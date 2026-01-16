@@ -7,33 +7,33 @@ import os
 from datetime import datetime
 
 # ======================================================
-# ⚙️ CONFIGURACIÓN FINAL
+# ⚙️ CONFIGURACIÓN "PLATINUM FINAL"
 # ======================================================
 CONFIG = {
     "APP_NAME": "Sistema Family Bicons 💎",
     "VALOR_NOMINAL": 5.0,
     "TASA_INTERES_ACCION": 0.20,
-    # Tu conexión directa (No la cambies)
     "DB_URL": "postgresql://postgres.osadlrveedbzfuoctwvz:Balla0605332550@aws-1-us-east-1.pooler.supabase.com:6543/postgres",
     "COLORS": {
-        "primary": "#004d00",     # Verde Bicons
-        "secondary": "#2e7d32",   # Verde Claro
-        "bg": "#f5f5f5",          # Fondo
-        "accent": "#ffab00",      # Dorado
+        "primary": "#004d00",
+        "secondary": "#2e7d32",
+        "bg": "#f5f5f5",
+        "accent": "#ffab00",
         "text": "#333333",
-        "danger": "#d32f2f",      # Rojo
+        "danger": "#d32f2f",
         "white": "#ffffff"
     }
 }
 
 # ======================================================
-# 🗄️ GESTOR DE BASE DE DATOS
+# 🗄️ GESTOR DE BASE DE DATOS (NUEVA TABLA)
 # ======================================================
 class DatabaseManager:
     def __init__(self):
         self.conn = None
         self.cursor = None
         self._conectar()
+        self._init_tables() 
 
     def _conectar(self):
         try:
@@ -41,13 +41,43 @@ class DatabaseManager:
             self.cursor = self.conn.cursor()
             print("✅ Conexión establecida a Supabase.")
         except Exception as e:
-            messagebox.showerror("Error de Conexión", f"No hay internet o la base de datos está caída.\n\nError: {e}")
+            messagebox.showerror("Error Crítico", f"Error de conexión:\n{e}")
             exit()
+
+    def _init_tables(self):
+        """Crea las tablas usando un NOMBRE NUEVO para evitar el bloqueo."""
+        if not self.conn: return
+        print("🔧 Verificando tablas...")
+        
+        try:
+            # CAMBIO CLAVE: Usamos 'creditos_clientes' en lugar de 'deudores'
+            # Esto evita el conflicto con la tabla bloqueada.
+            self.cursor.execute('''
+                CREATE TABLE IF NOT EXISTS creditos_clientes (
+                    id SERIAL PRIMARY KEY, 
+                    nombre TEXT, 
+                    mes TEXT, 
+                    plazo INTEGER, 
+                    monto REAL, 
+                    estado TEXT,
+                    tipo TEXT DEFAULT 'Normal',
+                    cuotas_pagadas INTEGER DEFAULT 0
+                )
+            ''')
+            
+            self.cursor.execute('''CREATE TABLE IF NOT EXISTS inversiones (id SERIAL PRIMARY KEY, nombre TEXT, valores_meses TEXT)''')
+            self.cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (id SERIAL PRIMARY KEY, usuario TEXT, password TEXT)''')
+            
+            self.conn.commit()
+            print("✅ Tablas listas (Nueva estructura).")
+
+        except Exception as e:
+            print(f"❌ Error creando tablas: {e}")
+            self.conn.rollback()
 
     def query(self, sql, params=()):
         if not self.conn: self._conectar()
         try:
-            # Adaptamos la sintaxis de Python (?) a Postgres (%s)
             sql_postgres = sql.replace("?", "%s")
             self.cursor.execute(sql_postgres, params)
             self.conn.commit()
@@ -81,8 +111,6 @@ class UIHelper:
         style.configure("Treeview", background="white", foreground="#333", rowheight=28, font=('Segoe UI', 9))
         style.configure("Treeview.Heading", background=CONFIG["COLORS"]["primary"], foreground="white", font=('Segoe UI', 9, 'bold'))
         style.map("Treeview", background=[('selected', CONFIG["COLORS"]["secondary"])])
-        style.configure("TNotebook", background=CONFIG["COLORS"]["bg"])
-        style.configure("TNotebook.Tab", padding=[15, 8], font=('Segoe UI', 10, 'bold'))
 
     @staticmethod
     def center_window(window, w, h):
@@ -95,7 +123,7 @@ class UIHelper:
                          font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2", width=width, pady=8)
 
 # ======================================================
-# 📄 GENERADOR DE REPORTES (PDF/HTML)
+# 📄 GENERADOR DE REPORTES
 # ======================================================
 class ReportGenerator:
     @staticmethod
@@ -200,10 +228,9 @@ class Login(tk.Toplevel):
     def exit_app(self): self.parent.destroy()
 
 # ======================================================
-# 📊 PESTAÑAS
+# 📊 PESTAÑAS (TODAS ACTUALIZADAS A 'creditos_clientes')
 # ======================================================
 
-# --- DASHBOARD ---
 class TabHome(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent, bg="#eee")
@@ -223,7 +250,8 @@ class TabHome(tk.Frame):
                 for i, v in enumerate(vals): ganancia_total += (v * CONFIG['TASA_INTERES_ACCION'] * (12 - i))
         
         capital = acciones_total * CONFIG['VALOR_NOMINAL']
-        deuda = sum([r[0] for r in db.fetch_all("SELECT monto FROM deudores WHERE estado='Pendiente'")])
+        # CAMBIO AQUÍ: tabla nueva
+        deuda = sum([r[0] for r in db.fetch_all("SELECT monto FROM creditos_clientes WHERE estado='Pendiente'")])
         
         datos = [("CAPITAL ($)", capital, "#004d00"), ("ACCIONES (#)", acciones_total, "#2e7d32"),
                  ("GANANCIAS ($)", ganancia_total, CONFIG["COLORS"]["accent"]), ("POR COBRAR ($)", deuda, CONFIG["COLORS"]["danger"])]
@@ -234,7 +262,6 @@ class TabHome(tk.Frame):
             tk.Label(fr, text=f"{int(v)}" if "#" in t else f"${v:,.2f}", font=("Arial", 22, "bold"), fg=c, bg="white").pack()
             tk.Frame(fr, bg=c, height=4).pack(fill="x", pady=(10,0))
 
-# --- ACCIONES ---
 class TabInvestments(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent, bg="white")
@@ -298,19 +325,15 @@ class TabInvestments(tk.Frame):
             except: messagebox.showerror("Error", "Solo números")
         UIHelper.btn(win, "Guardar", save, CONFIG["COLORS"]["primary"]).pack(pady=20)
 
-# --- CRÉDITOS (SOLUCIÓN FINAL) ---
 class TabDebtors(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent, bg="white")
         
-        # Panel Superior
         top = tk.Frame(self, bg="white"); top.pack(fill="x", padx=10, pady=10)
         
-        # Búsqueda
         lf1 = tk.LabelFrame(top, text="Buscar", bg="white", padx=5); lf1.pack(side="left", fill="y", padx=5)
         self.es = tk.Entry(lf1, width=20); self.es.pack(pady=5); self.es.bind("<KeyRelease>", lambda e: self.load(self.es.get()))
 
-        # Nuevo Crédito
         lf2 = tk.LabelFrame(top, text="Nuevo Crédito", bg="white", padx=5); lf2.pack(side="left", fill="both", expand=True)
         tk.Label(lf2, text="Cliente:", bg="white").grid(row=0, column=0)
         self.cb = ttk.Combobox(lf2, width=15); self.cb.grid(row=0, column=1, padx=5)
@@ -327,7 +350,6 @@ class TabDebtors(tk.Frame):
         
         UIHelper.btn(lf2, "GUARDAR", self.add, CONFIG["COLORS"]["primary"], 10).grid(row=0, column=8, padx=10)
 
-        # Tabla
         self.tr = ttk.Treeview(self, columns=("ID","Nom","Tip","Mon","Pla","Est"), show="headings", height=10)
         self.tr.heading("ID", text="ID"); self.tr.column("ID", width=30)
         self.tr.heading("Nom", text="CLIENTE"); self.tr.column("Nom", width=150)
@@ -338,7 +360,6 @@ class TabDebtors(tk.Frame):
         self.tr.tag_configure("Pendiente", foreground="red"); self.tr.tag_configure("Pagado", foreground="green")
         self.tr.pack(fill="both", expand=True, padx=10)
 
-        # Botones
         bot = tk.Frame(self, bg="white", pady=10); bot.pack(fill="x", padx=10)
         UIHelper.btn(bot, "VER DETALLE / PAGAR", self.detail, CONFIG["COLORS"]["secondary"], 20).pack(side="left")
         UIHelper.btn(bot, "ELIMINAR", self.dele, CONFIG["COLORS"]["danger"], 15).pack(side="right")
@@ -349,42 +370,41 @@ class TabDebtors(tk.Frame):
         except: pass
         for i in self.tr.get_children(): self.tr.delete(i)
         
-        # Lectura segura de columnas
-        for r in db.fetch_all("SELECT * FROM deudores ORDER BY id DESC"):
-            # Si hicimos el paso 1 (SQL), estas columnas EXISTEN. Si no, fallaría aquí.
-            # r = (id, nom, mes, pla, mon, est, tipo, pagadas)
+        # CAMBIO AQUÍ: Lectura de la tabla nueva
+        for r in db.fetch_all("SELECT * FROM creditos_clientes ORDER BY id DESC"):
             if q.lower() in r[1].lower():
                 tipo = r[6] if len(r) > 6 else "Normal"
                 self.tr.insert("", "end", values=(r[0], r[1], tipo, f"${r[4]:,.2f}", r[3], r[5]), tags=(r[5],))
 
     def add(self):
         try:
-            # Aquí es donde fallaba antes, ahora funcionará por el SQL manual
-            db.query("INSERT INTO deudores (nombre, mes, plazo, monto, estado, tipo, cuotas_pagadas) VALUES (?,?,?,?,?,?,?)",
+            # CAMBIO AQUÍ: Inserción en tabla nueva
+            db.query("INSERT INTO creditos_clientes (nombre, mes, plazo, monto, estado, tipo, cuotas_pagadas) VALUES (?,?,?,?,?,?,?)",
                      (self.cb.get(), datetime.now().strftime("%b"), int(self.ep.get()), float(self.em.get()), "Pendiente", self.cbt.get(), 0))
             messagebox.showinfo("OK", "Guardado"); self.em.delete(0,'end'); self.ep.delete(0,'end'); self.load()
         except Exception as e: messagebox.showerror("Error", f"{e}")
 
     def dele(self):
         if s := self.tr.selection():
-            if messagebox.askyesno("Borrar", "¿Seguro?"): db.query("DELETE FROM deudores WHERE id=?", (self.tr.item(s[0])['values'][0],)); self.load()
+            if messagebox.askyesno("Borrar", "¿Seguro?"): db.query("DELETE FROM creditos_clientes WHERE id=?", (self.tr.item(s[0])['values'][0],)); self.load()
 
     def detail(self):
         if not (s := self.tr.selection()): return
         id_ = self.tr.item(s[0])['values'][0]
-        data = db.fetch_all("SELECT * FROM deudores WHERE id=?", (id_,))[0]
+        # CAMBIO AQUÍ: Consulta a tabla nueva
+        data = db.fetch_all("SELECT * FROM creditos_clientes WHERE id=?", (id_,))[0]
         
         win = tk.Toplevel(self); win.geometry("700x500"); win.config(bg="white")
         tk.Label(win, text=data[1], font=("bold", 16), bg="white", fg="green").pack(pady=10)
         
-        if data[6] == "Emergente": # Tipo
+        if data[6] == "Emergente":
             tk.Label(win, text="CRÉDITO EMERGENTE", bg="white", fg="orange").pack()
             interes = data[4] * 0.10
             total = data[4] + interes
             
             def pay_int(): ReportGenerator.print_receipt(data[1], f"{interes}", "Pago Interés"); messagebox.showinfo("OK","Recibo generado")
             def pay_all(): 
-                db.query("UPDATE deudores SET estado='Pagado' WHERE id=?", (id_,))
+                db.query("UPDATE creditos_clientes SET estado='Pagado' WHERE id=?", (id_,))
                 ReportGenerator.print_receipt(data[1], f"{total}", "Cancelación Total"); win.destroy(); self.load()
             
             if data[5] == "Pendiente":
@@ -416,12 +436,11 @@ class TabDebtors(tk.Frame):
                 
                 if i == pagadas + 1:
                     def pagar(n=i):
-                        db.query("UPDATE deudores SET cuotas_pagadas=? WHERE id=?", (n, id_))
-                        if n==p: db.query("UPDATE deudores SET estado='Pagado' WHERE id=?", (id_,))
+                        db.query("UPDATE creditos_clientes SET cuotas_pagadas=? WHERE id=?", (n, id_))
+                        if n==p: db.query("UPDATE creditos_clientes SET estado='Pagado' WHERE id=?", (id_,))
                         ReportGenerator.print_receipt(data[1], f"{cuota:.2f}", f"Cuota {n}"); win.destroy(); self.load()
                     tk.Button(row, text="Pagar", command=pagar, bg="green", fg="white").pack(side="left")
 
-# --- SIMULADOR ---
 class TabCalc(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent, bg="white")
@@ -454,7 +473,6 @@ class TabCalc(tk.Frame):
         except: pass
     def pdf(self): ReportGenerator.print_amortization(self.em.get(), self.et.get(), self.ep.get(), self.d)
 
-# --- WEB ---
 class TabUsuarios(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent, bg="white")
@@ -474,9 +492,6 @@ class TabUsuarios(tk.Frame):
             messagebox.showinfo("OK", "Creado")
         except: pass
 
-# ======================================================
-# 🚀 ARRANQUE
-# ======================================================
 class MainApp(tk.Tk):
     def __init__(self):
         super().__init__()
