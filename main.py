@@ -12,26 +12,26 @@ from datetime import datetime
 # ======================================================
 CONFIG = {
     "APP_NAME": "Sistema Family Bicons 💎",
-    "VALOR_ACCION": 5.0,
+    "VALOR_NOMINAL": 5.0,   # Valor original
+    "VALOR_COSTO": 0.20,    # Nuevo valor solicitado (20 centavos)
     "DB_NAME": "family_bicons_db.db",
     "COLORS": {
-        "primary": "#004d00",      # Verde Oscuro Corporativo (Logo)
-        "secondary": "#2e7d32",    # Verde Hoja
-        "bg": "#f5f5f5",           # Gris Muy Claro
-        "accent": "#ffab00",       # Dorado (Monedas)
+        "primary": "#004d00",       # Verde Oscuro Corporativo
+        "secondary": "#2e7d32",     # Verde Hoja
+        "bg": "#f5f5f5",            # Gris Muy Claro
+        "accent": "#ffab00",        # Dorado
         "text": "#333333",
         "white": "#ffffff"
     }
 }
 
 # ======================================================
-# 🗄️ GESTOR DE BASE DE DATOS (VERSIÓN NUBE SUPABASE)
+# 🗄️ GESTOR DE BASE DE DATOS
 # ======================================================
 class DatabaseManager:
     def __init__(self):
-
+        # NOTA DE SEGURIDAD: Te recomiendo cambiar esta contraseña en producción
         self.DB_URL = "postgresql://postgres.osadlrveedbzfuoctwvz:Balla0605332550@aws-1-us-east-1.pooler.supabase.com:6543/postgres"
-
         self.conn = None
         self.cursor = None
         self._conectar()
@@ -48,9 +48,10 @@ class DatabaseManager:
     def _init_tables(self):
         if not self.conn: return
         try:
-            # Adaptamos el código para PostgreSQL (usa SERIAL en vez de AUTOINCREMENT)
+            # CORRECCIÓN: Se agregó la tabla 'usuarios' que faltaba
             self.cursor.execute('''CREATE TABLE IF NOT EXISTS deudores (id SERIAL PRIMARY KEY, nombre TEXT, mes TEXT, plazo INTEGER, monto REAL, estado TEXT)''')
             self.cursor.execute('''CREATE TABLE IF NOT EXISTS inversiones (id SERIAL PRIMARY KEY, nombre TEXT, valores_meses TEXT)''')
+            self.cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (id SERIAL PRIMARY KEY, usuario TEXT, password TEXT)''')
             self.conn.commit()
         except Exception as e:
             print(f"Error creando tablas: {e}")
@@ -59,10 +60,7 @@ class DatabaseManager:
     def query(self, sql, params=()):
         if not self.conn: return None
         try:
-            # Truco: Python usa '?' para SQLite, pero PostgreSQL usa '%s'
-            # Esta línea hace el cambio automáticamente para que no tengas que reescribir todo tu programa
             sql_postgres = sql.replace("?", "%s")
-            
             self.cursor.execute(sql_postgres, params)
             self.conn.commit()
             return self.cursor
@@ -84,7 +82,7 @@ class DatabaseManager:
 db = DatabaseManager()
 
 # ======================================================
-# 🎨 UI HELPERS (ESTILOS)
+# 🎨 UI HELPERS
 # ======================================================
 class UIHelper:
     @staticmethod
@@ -108,12 +106,11 @@ class UIHelper:
                          font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2", width=width, pady=8)
 
 # ======================================================
-# 📄 GENERADOR DE REPORTES (DISEÑO PDF EXACTO)
+# 📄 GENERADOR DE REPORTES
 # ======================================================
 class ReportGenerator:
     @staticmethod
     def get_logo_html():
-        # Recreación digital del logo para que sea INDESTRUCTIBLE
         return f"""
         <div style="text-align:center; margin-bottom:20px;">
             <div style="display:inline-block; width:140px; height:140px; border:5px solid {CONFIG['COLORS']['primary']}; border-radius:50%; position:relative; background:white;">
@@ -131,16 +128,10 @@ class ReportGenerator:
     def print_amortization(monto, tasa, plazo, datos_tabla):
         logo = ReportGenerator.get_logo_html()
         fecha_hoy = datetime.now().strftime("%d de %B del %Y")
-        
         rows = ""
-        total_int = 0
-        total_cap = 0
-        total_cuota = 0
-
+        total_int = 0; total_cap = 0; total_cuota = 0
         for r in datos_tabla:
-            # r = (Mes, Saldo, Interés, Capital, Cuota)
             rows += f"<tr><td>{r[0]}</td><td>{r[1]}</td><td>{r[2]}</td><td>{r[3]}</td><td><b>{r[4]}</b></td></tr>"
-            # Sumar totales (limpiando el símbolo $)
             try:
                 total_int += float(r[2].replace("$","").replace(",",""))
                 total_cap += float(r[3].replace("$","").replace(",",""))
@@ -148,68 +139,21 @@ class ReportGenerator:
             except: pass
 
         html = f"""
-        <html>
-        <head>
-            <style>
-                body {{ font-family: 'Helvetica', sans-serif; padding: 40px; background: #e0e0e0; }}
-                .page {{ background: white; padding: 50px; max-width: 850px; margin: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.15); border-top: 10px solid {CONFIG['COLORS']['primary']}; }}
-                h2 {{ text-align: center; color: {CONFIG['COLORS']['primary']}; margin-top: 0; text-transform: uppercase; letter-spacing: 2px; }}
-                .meta {{ text-align: right; color: #666; font-size: 12px; margin-bottom: 20px; }}
-                
-                .summary-box {{ background: #f1f8e9; border: 1px solid #c8e6c9; padding: 20px; border-radius: 8px; display: flex; justify-content: space-around; margin-bottom: 30px; }}
-                .stat {{ text-align: center; }}
-                .stat-label {{ display: block; font-size: 12px; color: {CONFIG['COLORS']['primary']}; font-weight: bold; text-transform: uppercase; }}
-                .stat-value {{ display: block; font-size: 20px; color: #333; font-weight: bold; margin-top: 5px; }}
-
-                table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
-                th {{ background: {CONFIG['COLORS']['primary']}; color: white; padding: 12px; text-transform: uppercase; font-size: 11px; }}
-                td {{ border-bottom: 1px solid #eee; padding: 10px; text-align: center; color: #444; }}
-                tr:nth-child(even) {{ background-color: #f9f9f9; }}
-                tr:last-child td {{ border-bottom: 2px solid {CONFIG['COLORS']['primary']}; font-weight: bold; }}
-                
-                .footer {{ margin-top: 40px; text-align: center; font-size: 10px; color: #aaa; border-top: 1px solid #eee; padding-top: 10px; }}
-            </style>
-        </head>
-        <body>
-            <div class="page">
-                {logo}
-                <h2>Tabla de Amortización</h2>
-                <div class="meta">Fecha de Emisión: {fecha_hoy}</div>
-
-                <div class="summary-box">
-                    <div class="stat"><span class="stat-label">Monto Crédito</span><span class="stat-value">${monto:,.2f}</span></div>
-                    <div class="stat"><span class="stat-label">Tasa Mensual</span><span class="stat-value">{tasa}%</span></div>
-                    <div class="stat"><span class="stat-label">Plazo</span><span class="stat-value">{plazo} Meses</span></div>
-                </div>
-
-                <table>
-                    <thead>
-                        <tr>
-                            <th>No. Cuota</th>
-                            <th>Saldo Pendiente</th>
-                            <th>Interés</th>
-                            <th>Capital</th>
-                            <th>Cuota a Pagar</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {rows}
-                        <tr style="background:#e8f5e9;">
-                            <td><b>TOTALES</b></td>
-                            <td>-</td>
-                            <td><b>${total_int:,.2f}</b></td>
-                            <td><b>${total_cap:,.2f}</b></td>
-                            <td><b>${total_cuota:,.2f}</b></td>
-                        </tr>
-                    </tbody>
-                </table>
-                
-                <div class="footer">
-                    Documento generado por Sistema FAMILY BICONS | Fundada el 15/09/2021
-                </div>
+        <html><head><style>
+            body {{ font-family: 'Helvetica', sans-serif; padding: 40px; background: #e0e0e0; }}
+            .page {{ background: white; padding: 50px; max-width: 850px; margin: auto; border-top: 10px solid {CONFIG['COLORS']['primary']}; }}
+            table {{ width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 20px; }}
+            th {{ background: {CONFIG['COLORS']['primary']}; color: white; padding: 10px; }}
+            td {{ border-bottom: 1px solid #eee; padding: 8px; text-align: center; }}
+        </style></head><body><div class="page">
+            {logo} <h2 style="text-align:center; color:{CONFIG['COLORS']['primary']};">Tabla de Amortización</h2>
+            <div style="text-align:center; background:#f1f8e9; padding:15px; margin-bottom:20px;">
+                <b>Monto:</b> ${monto:,.2f} | <b>Tasa:</b> {tasa}% | <b>Plazo:</b> {plazo} Meses
             </div>
-        </body>
-        </html>
+            <table><thead><tr><th>No.</th><th>Saldo</th><th>Interés</th><th>Capital</th><th>Cuota</th></tr></thead>
+            <tbody>{rows}<tr style="background:#e8f5e9; font-weight:bold;"><td>TOT</td><td>-</td><td>${total_int:,.2f}</td><td>${total_cap:,.2f}</td><td>${total_cuota:,.2f}</td></tr></tbody>
+            </table>
+        </div></body></html>
         """
         ReportGenerator._open(html, "Tabla_Amortizacion.html")
 
@@ -218,20 +162,11 @@ class ReportGenerator:
         logo = ReportGenerator.get_logo_html()
         html = f"""
         <html><body style="font-family:sans-serif; background:#ccc; padding:40px; display:flex; justify-content:center;">
-        <div style="background:white; padding:40px; width:400px; border-radius:5px; box-shadow:0 10px 25px rgba(0,0,0,0.2); border-top:8px solid {CONFIG['COLORS']['primary']};">
+        <div style="background:white; padding:40px; width:400px; border-top:8px solid {CONFIG['COLORS']['primary']};">
             {logo}
-            <h2 style="color:#333; text-align:center; letter-spacing:1px; margin-top:0;">RECIBO OFICIAL</h2>
-            <hr style="border:0; border-top:1px dashed #ddd; margin:20px 0;">
-            <p style="margin:5px 0; color:#666; font-size:12px;">CLIENTE</p>
-            <p style="margin:0 0 15px 0; font-size:18px; font-weight:bold; color:#333;">{nombre}</p>
-            
-            <p style="margin:5px 0; color:#666; font-size:12px;">CONCEPTO</p>
-            <p style="margin:0 0 15px 0; font-size:16px; color:#333;">{concepto}</p>
-            
-            <div style="background:#e8f5e9; color:{CONFIG['COLORS']['primary']}; padding:20px; text-align:center; font-size:32px; font-weight:bold; border-radius:8px; margin-top:30px; border:2px dashed {CONFIG['COLORS']['primary']};">
-                {monto}
-            </div>
-            <div style="text-align:center; margin-top:15px; font-size:12px; font-weight:bold; color:{CONFIG['COLORS']['primary']};">✅ OPERACIÓN EXITOSA</div>
+            <h2 style="text-align:center;">RECIBO OFICIAL</h2>
+            <p><b>CLIENTE:</b> {nombre}</p><p><b>CONCEPTO:</b> {concepto}</p>
+            <div style="background:#e8f5e9; color:{CONFIG['COLORS']['primary']}; padding:20px; text-align:center; font-size:32px; font-weight:bold; border:2px dashed {CONFIG['COLORS']['primary']};">{monto}</div>
         </div></body></html>"""
         ReportGenerator._open(html, "Recibo.html")
 
@@ -244,68 +179,42 @@ class ReportGenerator:
         except: pass
 
 # ======================================================
-# 🔐 LOGIN DE LUJO (SIN BORDES)
+# 🔐 LOGIN
 # ======================================================
 class Login(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.parent = parent
-        self.overrideredirect(True) # Quita los bordes de Windows
+        self.overrideredirect(True)
         self.geometry("400x550")
         UIHelper.center_window(self, 400, 550)
         self.config(bg=CONFIG["COLORS"]["primary"])
+        main_frame = tk.Frame(self, bg="white"); main_frame.pack(expand=True, fill="both", padx=2, pady=2)
         
-        # Marco Principal Blanco
-        main_frame = tk.Frame(self, bg="white")
-        main_frame.pack(expand=True, fill="both", padx=2, pady=2) # Borde fino verde
-        
-        # Botón Cerrar Personalizado
-        close_btn = tk.Button(main_frame, text="✕", command=self.exit_app, bg="white", fg="#999", 
-                              bd=0, font=("Arial", 14), cursor="hand2", activebackground="#fee", activeforeground="red")
-        close_btn.place(x=360, y=10)
-
-        # Logo / Icono
+        tk.Button(main_frame, text="✕", command=self.exit_app, bg="white", bd=0, font=("Arial", 14), fg="#999").place(x=360, y=10)
         tk.Label(main_frame, text="🌱", font=("Arial", 60), bg="white").pack(pady=(60, 10))
         tk.Label(main_frame, text="FAMILY BICONS", font=("Segoe UI", 18, "bold"), bg="white", fg=CONFIG["COLORS"]["primary"]).pack()
-        tk.Label(main_frame, text="Sistema Financiero", font=("Segoe UI", 10), bg="white", fg="#777").pack(pady=(0, 40))
-
-        # Campos de Texto Estilizados
-        self.create_entry(main_frame, "USUARIO", False)
-        self.e_u = self.last_entry
-        self.e_u.focus()
         
-        self.create_entry(main_frame, "CONTRASEÑA", True)
-        self.e_p = self.last_entry
-
-        # Botón Entrar
-        btn = tk.Button(main_frame, text="INICIAR SESIÓN", command=self.check, 
-                        bg=CONFIG["COLORS"]["primary"], fg="white", font=("Segoe UI", 11, "bold"), 
-                        relief="flat", cursor="hand2", pady=12)
-        btn.pack(fill="x", padx=40, pady=40)
+        self.create_entry(main_frame, "USUARIO", False); self.e_u = self.last_entry; self.e_u.focus()
+        self.create_entry(main_frame, "CONTRASEÑA", True); self.e_p = self.last_entry
         
-        # Footer
-        tk.Label(main_frame, text="v6.0 Platinum Edition", font=("Arial", 8), bg="white", fg="#ccc").pack(side="bottom", pady=10)
-
+        tk.Button(main_frame, text="INICIAR SESIÓN", command=self.check, bg=CONFIG["COLORS"]["primary"], fg="white", 
+                  font=("Segoe UI", 11, "bold"), relief="flat", pady=12).pack(fill="x", padx=40, pady=40)
         self.bind('<Return>', lambda e: self.check())
 
     def create_entry(self, parent, title, is_pass):
-        f = tk.Frame(parent, bg="white", padx=40)
-        f.pack(fill="x", pady=5)
+        f = tk.Frame(parent, bg="white", padx=40); f.pack(fill="x", pady=5)
         tk.Label(f, text=title, font=("Segoe UI", 8, "bold"), bg="white", fg="#aaa").pack(anchor="w")
         e = tk.Entry(f, font=("Segoe UI", 12), bg="#f9f9f9", bd=0, show="•" if is_pass else "")
-        e.pack(fill="x", ipady=8)
-        tk.Frame(f, bg=CONFIG["COLORS"]["primary"], height=2).pack(fill="x") # Línea verde abajo
-        self.last_entry = e
+        e.pack(fill="x", ipady=8); self.last_entry = e
+        tk.Frame(f, bg=CONFIG["COLORS"]["primary"], height=2).pack(fill="x")
 
     def check(self):
         if self.e_u.get() == "admin" and self.e_p.get() == "1234":
-            self.destroy()
-            self.parent.deiconify()
-        else:
-            messagebox.showerror("Acceso Denegado", "Usuario o Contraseña incorrectos")
+            self.destroy(); self.parent.deiconify()
+        else: messagebox.showerror("Error", "Datos incorrectos")
 
-    def exit_app(self):
-        self.parent.destroy()
+    def exit_app(self): self.parent.destroy()
 
 # ======================================================
 # 📊 PESTAÑAS PRINCIPALES
@@ -313,87 +222,58 @@ class Login(tk.Toplevel):
 class TabCalc(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent, bg="white")
-        # Header
-        header = tk.Frame(self, bg="white", pady=20)
-        header.pack(fill="x")
-        tk.Label(header, text="Calculadora de Préstamos", font=("Segoe UI", 20, "bold"), fg=CONFIG["COLORS"]["primary"], bg="white").pack()
-        tk.Label(header, text="Simulación y Tabla de Amortización", font=("Segoe UI", 10), fg="#777", bg="white").pack()
-
-        # Inputs
-        f_in = tk.Frame(self, bg="#f9f9f9", pady=15, padx=20, borderwidth=1, relief="solid")
-        f_in.pack(padx=20, pady=10, fill="x")
+        tk.Label(self, text="Calculadora de Préstamos", font=("Segoe UI", 20, "bold"), fg=CONFIG["COLORS"]["primary"], bg="white").pack(pady=20)
         
+        f_in = tk.Frame(self, bg="#f9f9f9", pady=15, padx=20, borderwidth=1, relief="solid"); f_in.pack(padx=20, fill="x")
         self.ents = {}
-        fields = [("Monto ($):", 12), ("Tasa Mensual (%):", 6), ("Plazo (Meses):", 6)]
-        for i, (txt, w) in enumerate(fields):
-            tk.Label(f_in, text=txt, bg="#f9f9f9", font=("Segoe UI", 10, "bold")).grid(row=0, column=i*2, padx=(10,5))
-            e = tk.Entry(f_in, width=w, font=("Segoe UI", 11), justify="center")
-            e.grid(row=0, column=i*2+1, padx=5)
-            self.ents[txt] = e
+        for i, (txt, w) in enumerate([("Monto ($):", 12), ("Tasa Mensual (%):", 6), ("Plazo (Meses):", 6)]):
+            tk.Label(f_in, text=txt, bg="#f9f9f9").grid(row=0, column=i*2, padx=(10,5))
+            e = tk.Entry(f_in, width=w, justify="center"); e.grid(row=0, column=i*2+1, padx=5); self.ents[txt] = e
 
-        # Botones
         f_btn = tk.Frame(self, bg="white", pady=10); f_btn.pack()
-        UIHelper.btn(f_btn, "CALCULAR TABLA", self.calc, CONFIG["COLORS"]["secondary"], 20).pack(side="left", padx=10)
-        self.btn_print = UIHelper.btn(f_btn, "🖨️ IMPRIMIR REPORTE", self.print_pdf, CONFIG["COLORS"]["primary"], 20)
-        self.btn_print.pack(side="left", padx=10)
-        self.btn_print["state"] = "disabled"
+        UIHelper.btn(f_btn, "CALCULAR", self.calc, CONFIG["COLORS"]["secondary"], 20).pack(side="left", padx=10)
+        self.btn_print = UIHelper.btn(f_btn, "🖨️ IMPRIMIR", self.print_pdf, CONFIG["COLORS"]["primary"], 20); self.btn_print.pack(side="left"); self.btn_print["state"] = "disabled"
 
-        # Tabla
         cols = ("No.", "Saldo Inicial", "Interés", "Capital", "Cuota Total")
         self.tree = ttk.Treeview(self, columns=cols, show="headings", height=12)
-        for c in cols: 
-            self.tree.heading(c, text=c)
-            self.tree.column(c, width=100, anchor="center")
+        for c in cols: self.tree.heading(c, text=c); self.tree.column(c, width=100, anchor="center")
         self.tree.pack(fill="both", expand=True, padx=20, pady=10)
 
     def calc(self):
         for i in self.tree.get_children(): self.tree.delete(i)
         try:
-            m = float(self.ents["Monto ($):"].get())
-            t = float(self.ents["Tasa Mensual (%):"].get()) / 100
-            p = int(self.ents["Plazo (Meses):"].get())
-            
-            # Cuota Fija
+            m = float(self.ents["Monto ($):"].get()); t = float(self.ents["Tasa Mensual (%):"].get()) / 100; p = int(self.ents["Plazo (Meses):"].get())
             c = m * (t * (1 + t)**p) / ((1 + t)**p - 1) if t > 0 else m / p
-            
-            saldo = m
-            self.data = []
-            
+            saldo = m; self.data = []
             for i in range(1, p + 1):
-                interes = saldo * t
-                capital = c - interes
-                saldo -= capital
-                if i == p: # Ajuste final
-                    capital += saldo
-                    saldo = 0
-                
+                interes = saldo * t; capital = c - interes; saldo -= capital
+                if i == p: capital += saldo; saldo = 0
                 row = (i, f"${(saldo+capital):,.2f}", f"${interes:,.2f}", f"${capital:,.2f}", f"${c:,.2f}")
-                self.tree.insert("", "end", values=row)
-                self.data.append(row)
-            
+                self.tree.insert("", "end", values=row); self.data.append(row)
             self.btn_print["state"] = "normal"
-            self.btn_print.config(bg=CONFIG["COLORS"]["primary"])
-        except: messagebox.showerror("Error", "Por favor ingresa números válidos.")
+        except: messagebox.showerror("Error", "Datos inválidos")
 
     def print_pdf(self):
         if hasattr(self, 'data'):
-            m = float(self.ents["Monto ($):"].get())
-            t = self.ents["Tasa Mensual (%):"].get()
-            p = self.ents["Plazo (Meses):"].get()
+            m = float(self.ents["Monto ($):"].get()); t = self.ents["Tasa Mensual (%):"].get(); p = self.ents["Plazo (Meses):"].get()
             ReportGenerator.print_amortization(m, t, p, self.data)
 
-# --- OTRAS PESTAÑAS (COMPACTAS) ---
 class TabInvestments(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent, bg="white")
         self.meses = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]
-        self.modo = False
+        
+        # Modo de vista: 0=Cantidad, 1=Valor Nominal ($5), 2=Valor Costo ($0.20)
+        self.modo = 0 
         
         top = tk.Frame(self, bg="white", pady=10); top.pack(fill="x", padx=10)
         tk.Label(top, text="Socio/Activo:", bg="white").pack(side="left")
         self.e_n = tk.Entry(top, bd=1, relief="solid"); self.e_n.pack(side="left", padx=5)
         UIHelper.btn(top, "➕ Agregar", self.add, CONFIG["COLORS"]["secondary"], 10).pack(side="left")
-        self.b_v = UIHelper.btn(top, "💲 Ver Dinero", self.togg, "#fbc02d", 15); self.b_v.pack(side="right")
+        
+        # Botón de estados (3 opciones)
+        self.b_v = UIHelper.btn(top, "🔢 Ver Cantidad", self.toggle_mode, "#fbc02d", 20)
+        self.b_v.pack(side="right")
 
         cols = ["ID", "Nombre"] + self.meses + ["TOTAL"]
         self.tr = ttk.Treeview(self, columns=cols, show="headings", height=10)
@@ -403,44 +283,114 @@ class TabInvestments(tk.Frame):
         for m in self.meses: self.tr.heading(m, text=m); self.tr.column(m, width=40, anchor="center")
         self.tr.pack(fill="both", expand=True, padx=10)
         
-        ed = tk.Frame(self, bg="#eee", pady=5); ed.pack(fill="x", padx=10, pady=5)
-        tk.Label(ed, text="Editar Mes:", bg="#eee").pack(side="left")
-        self.c_m = ttk.Combobox(ed, values=self.meses, width=5); self.c_m.pack(side="left"); self.c_m.current(0)
-        self.e_v = tk.Entry(ed, width=8); self.e_v.pack(side="left", padx=5)
-        UIHelper.btn(ed, "💾 Guardar", self.upd, CONFIG["COLORS"]["primary"], 10).pack(side="left")
-        UIHelper.btn(ed, "🗑 Borrar", self.dele, "#d32f2f", 10).pack(side="right")
+        # Barra de Edición Global
+        ed = tk.Frame(self, bg="#eee", pady=10); ed.pack(fill="x", padx=10, pady=5)
+        
+        # Botón para editar TODO de una vez
+        UIHelper.btn(ed, "✏️ Editar Año Completo", self.edit_full_year, CONFIG["COLORS"]["primary"], 25).pack(side="left", padx=10)
+        UIHelper.btn(ed, "🗑 Borrar Seleccionado", self.dele, "#d32f2f", 20).pack(side="right", padx=10)
+        
         self.load()
 
     def load(self):
         for i in self.tr.get_children(): self.tr.delete(i)
-        for r in db.fetch_all("SELECT * FROM inversiones"):
+        # CORRECCIÓN: Se agrega ORDER BY id ASC para que no pierdan su puesto
+        for r in db.fetch_all("SELECT * FROM inversiones ORDER BY id ASC"):
             v = [float(x) for x in r[2].split(",")]
-            d = [f"${(x*CONFIG['VALOR_ACCION']):,.0f}" if self.modo else f"{int(x)}" for x in v]
-            t = f"${(sum(v)*CONFIG['VALOR_ACCION']):,.0f}" if self.modo else f"{int(sum(v))}"
+            
+            # Lógica de las 3 opciones
+            if self.modo == 0: # Cantidad normal
+                d = [f"{int(x)}" for x in v]
+                t = f"{int(sum(v))}"
+            elif self.modo == 1: # Valor Nominal ($5.00)
+                d = [f"${(x*CONFIG['VALOR_NOMINAL']):,.0f}" for x in v]
+                t = f"${(sum(v)*CONFIG['VALOR_NOMINAL']):,.0f}"
+            else: # Valor Costo ($0.20)
+                d = [f"${(x*CONFIG['VALOR_COSTO']):,.2f}" for x in v]
+                t = f"${(sum(v)*CONFIG['VALOR_COSTO']):,.2f}"
+
             self.tr.insert("", "end", values=(r[0], r[1], *d, t))
+
     def add(self):
-        if self.e_n.get(): db.query("INSERT INTO inversiones (nombre, valores_meses) VALUES (?,?)", (self.e_n.get(), ",".join(["0"]*12))); self.e_n.delete(0,'end'); self.load()
-    def togg(self): self.modo = not self.modo; self.load()
-    def upd(self):
-        if s := self.tr.selection():
+        if self.e_n.get():
+            db.query("INSERT INTO inversiones (nombre, valores_meses) VALUES (?,?)", (self.e_n.get(), ",".join(["0"]*12)))
+            self.e_n.delete(0,'end')
+            self.load()
+
+    def toggle_mode(self):
+        # Ciclo entre 0 -> 1 -> 2 -> 0
+        self.modo = (self.modo + 1) % 3
+        
+        if self.modo == 0: self.b_v.config(text="🔢 Ver Cantidad")
+        elif self.modo == 1: self.b_v.config(text="💵 Ver Valor ($5)")
+        else: self.b_v.config(text="📉 Ver Costo ($0.20)")
+        
+        self.load()
+
+    def edit_full_year(self):
+        # Ventana emergente para editar los 12 meses de golpe
+        sel = self.tr.selection()
+        if not sel:
+            messagebox.showinfo("Atención", "Selecciona un socio primero")
+            return
+
+        id_ = self.tr.item(sel[0])['values'][0]
+        nombre = self.tr.item(sel[0])['values'][1]
+        
+        # Obtener valores reales de la base de datos
+        raw_vals = db.fetch_all("SELECT valores_meses FROM inversiones WHERE id=?", (id_,))[0][0]
+        current_vals = [int(float(x)) for x in raw_vals.split(",")]
+
+        # Crear ventana
+        win = tk.Toplevel(self)
+        win.title(f"Editando: {nombre}")
+        win.geometry("600x200")
+        UIHelper.center_window(win, 600, 200)
+        win.config(bg="white")
+        
+        tk.Label(win, text=f"Editar acciones de {nombre}", font=("bold"), bg="white").pack(pady=10)
+        
+        f_grid = tk.Frame(win, bg="white"); f_grid.pack(pady=10)
+        
+        self.temp_entries = []
+        
+        # Crear 2 filas de 6 meses
+        for i, mes in enumerate(self.meses):
+            r = 0 if i < 6 else 2
+            c = i if i < 6 else i - 6
+            
+            tk.Label(f_grid, text=mes, bg="white", font=("Arial", 8)).grid(row=r, column=c, padx=5)
+            e = tk.Entry(f_grid, width=8, justify="center")
+            e.insert(0, str(current_vals[i]))
+            e.grid(row=r+1, column=c, padx=5, pady=(0, 10))
+            self.temp_entries.append(e)
+
+        def save_changes():
             try:
-                id_ = self.tr.item(s[0])['values'][0]
-                v = [float(x) for x in db.fetch_all("SELECT valores_meses FROM inversiones WHERE id=?",(id_,))[0][0].split(",")]
-                v[self.c_m.current()] = float(self.e_v.get())
-                db.query("UPDATE inversiones SET valores_meses=? WHERE id=?", (",".join(map(str,v)), id_)); self.load(); self.e_v.delete(0,'end')
-            except: pass
+                # Recoger los 12 valores
+                new_vals = [str(float(e.get())) for e in self.temp_entries]
+                str_vals = ",".join(new_vals)
+                db.query("UPDATE inversiones SET valores_meses=? WHERE id=?", (str_vals, id_))
+                self.load() # Recargar la tabla principal
+                win.destroy()
+            except ValueError:
+                messagebox.showerror("Error", "Ingresa solo números válidos")
+
+        UIHelper.btn(win, "💾 Guardar Cambios", save_changes, CONFIG["COLORS"]["primary"], 20).pack(pady=10)
+
     def dele(self):
-        if s := self.tr.selection(): db.query("DELETE FROM inversiones WHERE id=?", (self.tr.item(s[0])['values'][0],)); self.load()
+        if s := self.tr.selection():
+            if messagebox.askyesno("Confirmar", "¿Eliminar socio?"):
+                db.query("DELETE FROM inversiones WHERE id=?", (self.tr.item(s[0])['values'][0],))
+                self.load()
 
 class TabDebtors(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent, bg="white")
-        # Search
         f1 = tk.Frame(self, bg="white", pady=10); f1.pack(fill="x", padx=10)
         tk.Label(f1, text="🔍 Buscar:", bg="white").pack(side="left")
         self.e_s = tk.Entry(f1, bd=1, relief="solid"); self.e_s.pack(side="left", padx=5); self.e_s.bind("<KeyRelease>", lambda e: self.load(self.e_s.get()))
         
-        # Add
         f2 = tk.LabelFrame(self, text="Nuevo Préstamo", bg="white", padx=5, pady=5); f2.pack(fill="x", padx=10)
         self.ents = {}
         for i, (l, w) in enumerate([("Cliente:",15), ("Mes:",5), ("Plazo:",4), ("Monto:",8)]):
@@ -449,7 +399,6 @@ class TabDebtors(tk.Frame):
             e.grid(row=0, column=i*2+1, padx=5); self.ents[l] = e
         UIHelper.btn(f2, "Guardar", self.add, CONFIG["COLORS"]["primary"], 10).grid(row=0, column=8, padx=10)
 
-        # Table
         cols = ("ID", "Nom", "Mes", "Pla", "Mon", "Est")
         self.tr = ttk.Treeview(self, columns=cols, show="headings", height=8)
         self.tr.heading("ID", text="ID"); self.tr.column("ID", width=0, stretch=False)
@@ -458,7 +407,6 @@ class TabDebtors(tk.Frame):
         self.tr.tag_configure("Pendiente", foreground="red"); self.tr.tag_configure("Pagado", foreground="green")
         self.tr.pack(fill="both", expand=True, padx=10, pady=5)
 
-        # Actions
         f3 = tk.Frame(self, bg="white", pady=5); f3.pack(fill="x", padx=10)
         UIHelper.btn(f3, "✅ Pagar", self.pay, CONFIG["COLORS"]["secondary"]).pack(side="left", padx=2)
         UIHelper.btn(f3, "🖨️ Recibo", self.rec, CONFIG["COLORS"]["accent"]).pack(side="left", padx=2)
@@ -492,7 +440,7 @@ class TabHome(tk.Frame):
         self.ref()
     def ref(self):
         for w in self.f.winfo_children(): w.destroy()
-        inv = sum([sum(map(float, r[0].split(","))) for r in db.fetch_all("SELECT valores_meses FROM inversiones")]) * CONFIG["VALOR_ACCION"]
+        inv = sum([sum(map(float, r[0].split(","))) for r in db.fetch_all("SELECT valores_meses FROM inversiones")]) * CONFIG["VALOR_NOMINAL"]
         deu = sum([r[0] for r in db.fetch_all("SELECT monto FROM deudores WHERE estado='Pendiente'")])
         for t, v, c in [("CAPITAL TOTAL", inv+deu, "#004d00"), ("EN ACCIONES", inv, "#2e7d32"), ("POR COBRAR", deu, "#d32f2f")]:
             fr = tk.Frame(self.f, bg="white", pady=20, padx=20); fr.pack(side="left", fill="both", expand=True, padx=10)
@@ -500,69 +448,35 @@ class TabHome(tk.Frame):
             tk.Label(fr, text=f"${v:,.2f}", font=("Arial", 24, "bold"), fg=c, bg="white").pack()
             tk.Frame(fr, bg=c, height=4).pack(fill="x", pady=(10,0))
 
-# ======================================================
-# 🔐 PESTAÑA GESTIÓN DE USUARIOS (NUEVO)
-# ======================================================
 class TabUsuarios(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent, bg="white")
-        
-        # Título
         tk.Label(self, text="Crear Acceso Web para Socios", font=("Segoe UI", 16, "bold"), bg="white", fg=CONFIG["COLORS"]["primary"]).pack(pady=20)
-        
-        # Área de Formulario
-        f_form = tk.Frame(self, bg="#f9f9f9", padx=20, pady=20, bd=1, relief="solid")
-        f_form.pack(pady=10)
+        f_form = tk.Frame(self, bg="#f9f9f9", padx=20, pady=20, bd=1, relief="solid"); f_form.pack(pady=10)
 
-        # Selección de Socio (Combobox para no equivocarse de nombre)
         tk.Label(f_form, text="Selecciona el Socio:", bg="#f9f9f9", font=("Segoe UI", 10)).grid(row=0, column=0, sticky="w")
-        self.combo_socios = ttk.Combobox(f_form, width=25, state="readonly")
-        self.combo_socios.grid(row=0, column=1, padx=10, pady=5)
+        self.combo_socios = ttk.Combobox(f_form, width=25, state="readonly"); self.combo_socios.grid(row=0, column=1, padx=10, pady=5)
         
-        # Contraseña
         tk.Label(f_form, text="Asignar Contraseña:", bg="#f9f9f9", font=("Segoe UI", 10)).grid(row=1, column=0, sticky="w")
-        self.entry_pass = tk.Entry(f_form, width=27)
-        self.entry_pass.grid(row=1, column=1, padx=10, pady=5)
+        self.entry_pass = tk.Entry(f_form, width=27); self.entry_pass.grid(row=1, column=1, padx=10, pady=5)
         
-        # Botón Guardar
         UIHelper.btn(f_form, "💾 Crear Usuario", self.crear_usuario, CONFIG["COLORS"]["secondary"], 20).grid(row=2, column=0, columnspan=2, pady=20)
-        
-        # Botón Refrescar lista
         tk.Button(self, text="🔄 Actualizar lista de socios", command=self.cargar_socios, bg="white", bd=0, fg="blue", cursor="hand2").pack()
-
         self.cargar_socios()
 
     def cargar_socios(self):
-        # Busca todos los nombres de la tabla INVERSIONES para llenar la lista
-        try:
-            rows = db.fetch_all("SELECT nombre FROM inversiones")
-            # Guardamos solo los nombres en una lista
-            nombres = [r[0] for r in rows]
-            self.combo_socios['values'] = nombres
+        try: self.combo_socios['values'] = [r[0] for r in db.fetch_all("SELECT nombre FROM inversiones")]
         except: pass
 
     def crear_usuario(self):
-        nombre = self.combo_socios.get()
-        password = self.entry_pass.get()
-        
-        if not nombre or not password:
-            messagebox.showwarning("Faltan datos", "Por favor selecciona un socio y escribe una contraseña.")
-            return
-
+        n = self.combo_socios.get(); p = self.entry_pass.get()
+        if not n or not p: messagebox.showwarning("Faltan datos", "Selecciona socio y escribe contraseña."); return
         try:
-            # 1. Primero intentamos borrar si ya existía para actualizar la clave
-            db.query("DELETE FROM usuarios WHERE usuario = %s", (nombre,))
-            # 2. Creamos el nuevo usuario
-            db.query("INSERT INTO usuarios (usuario, password) VALUES (%s, %s)", (nombre, password))
-            
-            messagebox.showinfo("Éxito", f"✅ Acceso creado para '{nombre}'.\nClave: {password}")
-            self.entry_pass.delete(0, 'end')
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo crear el usuario: {e}")
+            db.query("DELETE FROM usuarios WHERE usuario = %s", (n,))
+            db.query("INSERT INTO usuarios (usuario, password) VALUES (%s, %s)", (n, p))
+            messagebox.showinfo("Éxito", f"✅ Acceso creado para '{n}'."); self.entry_pass.delete(0, 'end')
+        except Exception as e: messagebox.showerror("Error", f"Error: {e}")
 
-# ======================================================
-# 🚀 ARRANQUE
-# ======================================================
 class MainApp(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -571,10 +485,8 @@ class MainApp(tk.Tk):
         UIHelper.center_window(self, 1100, 750)
         UIHelper.style_setup()
         
-        # Menu Lateral (Simulado con Tabs arriba para simpleza)
         tabs = ttk.Notebook(self)
         tabs.pack(fill="both", expand=True)
-        
         tabs.add(TabHome(tabs), text="  📊 DASHBOARD  ")
         tabs.add(TabInvestments(tabs), text="  💎 ACCIONES  ")
         tabs.add(TabDebtors(tabs), text="  👥 CRÉDITOS  ")
@@ -583,6 +495,6 @@ class MainApp(tk.Tk):
 
 if __name__ == "__main__":
     app = MainApp()
-    app.withdraw() # Ocultar ventana principal
-    Login(app)     # Mostrar Login
+    app.withdraw()
+    Login(app)
     app.mainloop()
