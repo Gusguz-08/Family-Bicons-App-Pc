@@ -12,8 +12,8 @@ from datetime import datetime
 # ======================================================
 CONFIG = {
     "APP_NAME": "Sistema Family Bicons 💎",
-    "VALOR_NOMINAL": 5.0,   # Valor original
-    "VALOR_COSTO": 0.20,    # Nuevo valor solicitado (20 centavos)
+    "VALOR_NOMINAL": 5.0,   # Valor de la acción (Capital)
+    "TASA_INTERES": 0.20,   # Ganancia por acción por mes
     "DB_NAME": "family_bicons_db.db",
     "COLORS": {
         "primary": "#004d00",       # Verde Oscuro Corporativo
@@ -30,7 +30,7 @@ CONFIG = {
 # ======================================================
 class DatabaseManager:
     def __init__(self):
-        # NOTA DE SEGURIDAD: Te recomiendo cambiar esta contraseña en producción
+        # ⚠️ RECOMENDACIÓN: Usa variables de entorno para la contraseña en un entorno real
         self.DB_URL = "postgresql://postgres.osadlrveedbzfuoctwvz:Balla0605332550@aws-1-us-east-1.pooler.supabase.com:6543/postgres"
         self.conn = None
         self.cursor = None
@@ -48,7 +48,6 @@ class DatabaseManager:
     def _init_tables(self):
         if not self.conn: return
         try:
-            # CORRECCIÓN: Se agregó la tabla 'usuarios' que faltaba
             self.cursor.execute('''CREATE TABLE IF NOT EXISTS deudores (id SERIAL PRIMARY KEY, nombre TEXT, mes TEXT, plazo INTEGER, monto REAL, estado TEXT)''')
             self.cursor.execute('''CREATE TABLE IF NOT EXISTS inversiones (id SERIAL PRIMARY KEY, nombre TEXT, valores_meses TEXT)''')
             self.cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (id SERIAL PRIMARY KEY, usuario TEXT, password TEXT)''')
@@ -127,7 +126,6 @@ class ReportGenerator:
     @staticmethod
     def print_amortization(monto, tasa, plazo, datos_tabla):
         logo = ReportGenerator.get_logo_html()
-        fecha_hoy = datetime.now().strftime("%d de %B del %Y")
         rows = ""
         total_int = 0; total_cap = 0; total_cuota = 0
         for r in datos_tabla:
@@ -210,6 +208,7 @@ class Login(tk.Toplevel):
         tk.Frame(f, bg=CONFIG["COLORS"]["primary"], height=2).pack(fill="x")
 
     def check(self):
+        # Aquí podrías conectar con la tabla 'usuarios' si quisieras login real
         if self.e_u.get() == "admin" and self.e_p.get() == "1234":
             self.destroy(); self.parent.deiconify()
         else: messagebox.showerror("Error", "Datos incorrectos")
@@ -228,7 +227,7 @@ class TabCalc(tk.Frame):
         self.ents = {}
         for i, (txt, w) in enumerate([("Monto ($):", 12), ("Tasa Mensual (%):", 6), ("Plazo (Meses):", 6)]):
             tk.Label(f_in, text=txt, bg="#f9f9f9").grid(row=0, column=i*2, padx=(10,5))
-            e = tk.Entry(f_in, width=w, justify="center"); e.grid(row=0, column=i*2+1, padx=5); self.ents[txt] = e
+            e = tk.Entry(f_in, width=8, justify="center"); e.grid(row=0, column=i*2+1, padx=5); self.ents[txt] = e
 
         f_btn = tk.Frame(self, bg="white", pady=10); f_btn.pack()
         UIHelper.btn(f_btn, "CALCULAR", self.calc, CONFIG["COLORS"]["secondary"], 20).pack(side="left", padx=10)
@@ -263,7 +262,7 @@ class TabInvestments(tk.Frame):
         super().__init__(parent, bg="white")
         self.meses = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]
         
-        # Modo de vista: 0=Cantidad, 1=Valor Nominal ($5), 2=Valor Costo ($0.20)
+        # Modo de vista: 0=Cantidad, 1=Valor Nominal ($5), 2=Ganancia Acumulada ($0.20 x Tiempo)
         self.modo = 0 
         
         top = tk.Frame(self, bg="white", pady=10); top.pack(fill="x", padx=10)
@@ -271,8 +270,8 @@ class TabInvestments(tk.Frame):
         self.e_n = tk.Entry(top, bd=1, relief="solid"); self.e_n.pack(side="left", padx=5)
         UIHelper.btn(top, "➕ Agregar", self.add, CONFIG["COLORS"]["secondary"], 10).pack(side="left")
         
-        # Botón de estados (3 opciones)
-        self.b_v = UIHelper.btn(top, "🔢 Ver Cantidad", self.toggle_mode, "#fbc02d", 20)
+        # Botón de estados
+        self.b_v = UIHelper.btn(top, "🔢 Ver Cantidad", self.toggle_mode, "#fbc02d", 22)
         self.b_v.pack(side="right")
 
         cols = ["ID", "Nombre"] + self.meses + ["TOTAL"]
@@ -280,13 +279,11 @@ class TabInvestments(tk.Frame):
         self.tr.heading("ID", text="#"); self.tr.column("ID", width=30)
         self.tr.heading("Nombre", text="Socio"); self.tr.column("Nombre", width=120)
         self.tr.heading("TOTAL", text="TOTAL"); self.tr.column("TOTAL", width=70)
-        for m in self.meses: self.tr.heading(m, text=m); self.tr.column(m, width=40, anchor="center")
+        for m in self.meses: self.tr.heading(m, text=m); self.tr.column(m, width=45, anchor="center")
         self.tr.pack(fill="both", expand=True, padx=10)
         
-        # Barra de Edición Global
+        # Barra de Edición
         ed = tk.Frame(self, bg="#eee", pady=10); ed.pack(fill="x", padx=10, pady=5)
-        
-        # Botón para editar TODO de una vez
         UIHelper.btn(ed, "✏️ Editar Año Completo", self.edit_full_year, CONFIG["COLORS"]["primary"], 25).pack(side="left", padx=10)
         UIHelper.btn(ed, "🗑 Borrar Seleccionado", self.dele, "#d32f2f", 20).pack(side="right", padx=10)
         
@@ -294,20 +291,31 @@ class TabInvestments(tk.Frame):
 
     def load(self):
         for i in self.tr.get_children(): self.tr.delete(i)
-        # CORRECCIÓN: Se agrega ORDER BY id ASC para que no pierdan su puesto
+        
+        # Seleccionamos y ordenamos por ID para que no salten de lugar
         for r in db.fetch_all("SELECT * FROM inversiones ORDER BY id ASC"):
+            # r[2] es el string "1,0,5,2..."
             v = [float(x) for x in r[2].split(",")]
             
-            # Lógica de las 3 opciones
-            if self.modo == 0: # Cantidad normal
+            if self.modo == 0: # MODO: Cantidad de Acciones
                 d = [f"{int(x)}" for x in v]
                 t = f"{int(sum(v))}"
-            elif self.modo == 1: # Valor Nominal ($5.00)
+                
+            elif self.modo == 1: # MODO: Capital ($5.00 por acción)
                 d = [f"${(x*CONFIG['VALOR_NOMINAL']):,.0f}" for x in v]
                 t = f"${(sum(v)*CONFIG['VALOR_NOMINAL']):,.0f}"
-            else: # Valor Costo ($0.20)
-                d = [f"${(x*CONFIG['VALOR_COSTO']):,.2f}" for x in v]
-                t = f"${(sum(v)*CONFIG['VALOR_COSTO']):,.2f}"
+                
+            else: # MODO: Ganancia / Interés ($0.20 por mes restante)
+                # Lógica: Enero (idx 0) -> Quedan 12 meses. Noviembre (idx 10) -> Quedan 2 meses.
+                # Formula: Acciones * 0.20 * (12 - indice_mes)
+                ganancias = []
+                for i, acciones in enumerate(v):
+                    meses_restantes = 12 - i # Ene=12, Feb=11... Dic=1
+                    ganancia_mes = acciones * CONFIG['TASA_INTERES'] * meses_restantes
+                    ganancias.append(ganancia_mes)
+                
+                d = [f"${g:,.2f}" if g > 0 else "-" for g in ganancias]
+                t = f"${sum(ganancias):,.2f}"
 
             self.tr.insert("", "end", values=(r[0], r[1], *d, t))
 
@@ -318,30 +326,23 @@ class TabInvestments(tk.Frame):
             self.load()
 
     def toggle_mode(self):
-        # Ciclo entre 0 -> 1 -> 2 -> 0
         self.modo = (self.modo + 1) % 3
-        
         if self.modo == 0: self.b_v.config(text="🔢 Ver Cantidad")
-        elif self.modo == 1: self.b_v.config(text="💵 Ver Valor ($5)")
-        else: self.b_v.config(text="📉 Ver Costo ($0.20)")
-        
+        elif self.modo == 1: self.b_v.config(text="💵 Ver Capital ($5)")
+        else: self.b_v.config(text="📈 Ver Ganancia ($0.20)")
         self.load()
 
     def edit_full_year(self):
-        # Ventana emergente para editar los 12 meses de golpe
         sel = self.tr.selection()
-        if not sel:
-            messagebox.showinfo("Atención", "Selecciona un socio primero")
-            return
+        if not sel: messagebox.showinfo("Atención", "Selecciona un socio primero"); return
 
         id_ = self.tr.item(sel[0])['values'][0]
         nombre = self.tr.item(sel[0])['values'][1]
         
-        # Obtener valores reales de la base de datos
+        # Recuperamos los datos crudos de la BD para editarlos
         raw_vals = db.fetch_all("SELECT valores_meses FROM inversiones WHERE id=?", (id_,))[0][0]
         current_vals = [int(float(x)) for x in raw_vals.split(",")]
 
-        # Crear ventana
         win = tk.Toplevel(self)
         win.title(f"Editando: {nombre}")
         win.geometry("600x200")
@@ -349,16 +350,12 @@ class TabInvestments(tk.Frame):
         win.config(bg="white")
         
         tk.Label(win, text=f"Editar acciones de {nombre}", font=("bold"), bg="white").pack(pady=10)
-        
         f_grid = tk.Frame(win, bg="white"); f_grid.pack(pady=10)
         
         self.temp_entries = []
-        
-        # Crear 2 filas de 6 meses
         for i, mes in enumerate(self.meses):
             r = 0 if i < 6 else 2
             c = i if i < 6 else i - 6
-            
             tk.Label(f_grid, text=mes, bg="white", font=("Arial", 8)).grid(row=r, column=c, padx=5)
             e = tk.Entry(f_grid, width=8, justify="center")
             e.insert(0, str(current_vals[i]))
@@ -367,22 +364,17 @@ class TabInvestments(tk.Frame):
 
         def save_changes():
             try:
-                # Recoger los 12 valores
                 new_vals = [str(float(e.get())) for e in self.temp_entries]
-                str_vals = ",".join(new_vals)
-                db.query("UPDATE inversiones SET valores_meses=? WHERE id=?", (str_vals, id_))
-                self.load() # Recargar la tabla principal
-                win.destroy()
-            except ValueError:
-                messagebox.showerror("Error", "Ingresa solo números válidos")
+                db.query("UPDATE inversiones SET valores_meses=? WHERE id=?", (",".join(new_vals), id_))
+                self.load(); win.destroy()
+            except: messagebox.showerror("Error", "Ingresa solo números")
 
         UIHelper.btn(win, "💾 Guardar Cambios", save_changes, CONFIG["COLORS"]["primary"], 20).pack(pady=10)
 
     def dele(self):
         if s := self.tr.selection():
             if messagebox.askyesno("Confirmar", "¿Eliminar socio?"):
-                db.query("DELETE FROM inversiones WHERE id=?", (self.tr.item(s[0])['values'][0],))
-                self.load()
+                db.query("DELETE FROM inversiones WHERE id=?", (self.tr.item(s[0])['values'][0],)); self.load()
 
 class TabDebtors(tk.Frame):
     def __init__(self, parent):
