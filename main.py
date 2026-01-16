@@ -13,6 +13,7 @@ CONFIG = {
     "APP_NAME": "Sistema Family Bicons 💎",
     "VALOR_NOMINAL": 5.0,         # Valor de la acción
     "TASA_INTERES_ACCION": 0.20,  # 20% anual para cálculo de ganancias
+    # Tu conexión a Supabase
     "DB_URL": "postgresql://postgres.osadlrveedbzfuoctwvz:Balla0605332550@aws-1-us-east-1.pooler.supabase.com:6543/postgres",
     "COLORS": {
         "primary": "#004d00",     # Verde Oscuro (Identidad)
@@ -33,7 +34,7 @@ class DatabaseManager:
         self.conn = None
         self.cursor = None
         self._conectar()
-        self._init_tables_and_migrate()
+        self._force_structure_update() # <--- ESTO ARREGLA TU ERROR AL INICIAR
 
     def _conectar(self):
         try:
@@ -44,35 +45,37 @@ class DatabaseManager:
             messagebox.showerror("Error Crítico", f"No se pudo conectar a la base de datos:\n{e}")
             exit()
 
-    def _init_tables_and_migrate(self):
-        """Crea tablas si no existen y AGREGA COLUMNAS FALTANTES (Solución al error)"""
+    def _force_structure_update(self):
+        """Revisa y CREA las columnas que faltan a la fuerza."""
         if not self.conn: return
+        print("🔧 Verificando estructura de la base de datos...")
+        
         try:
-            # 1. Crear tablas básicas
+            # 1. Asegurar que las tablas existan
             self.cursor.execute('''CREATE TABLE IF NOT EXISTS deudores (id SERIAL PRIMARY KEY, nombre TEXT, mes TEXT, plazo INTEGER, monto REAL, estado TEXT)''')
             self.cursor.execute('''CREATE TABLE IF NOT EXISTS inversiones (id SERIAL PRIMARY KEY, nombre TEXT, valores_meses TEXT)''')
             self.cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (id SERIAL PRIMARY KEY, usuario TEXT, password TEXT)''')
             self.conn.commit()
 
-            # 2. AUTO-MIGRACIÓN: Agregar columnas nuevas si faltan (Esto arregla tu error)
-            # Usamos transacciones separadas para asegurar que cada cambio se aplique
-            alter_commands = [
+            # 2. INYECCIÓN DE COLUMNAS (El arreglo del error)
+            # Intentamos agregar las columnas. Si ya existen, Postgres lanzará un aviso interno pero no romperá la app gracias al try/except.
+            commands = [
                 "ALTER TABLE deudores ADD COLUMN IF NOT EXISTS tipo TEXT DEFAULT 'Normal';",
                 "ALTER TABLE deudores ADD COLUMN IF NOT EXISTS cuotas_pagadas INTEGER DEFAULT 0;"
             ]
             
-            for cmd in alter_commands:
+            for cmd in commands:
                 try:
                     self.cursor.execute(cmd)
                     self.conn.commit()
                 except Exception as e:
-                    print(f"Nota de migración: {e}")
-                    self.conn.rollback()
-            
-            print("🔧 Base de datos verificada y actualizada.")
-            
+                    self.conn.rollback() # Si falla, seguimos (probablemente ya existía)
+                    print(f"   -> Nota DB: {e}")
+
+            print("✅ Base de datos verificada y actualizada.")
+
         except Exception as e:
-            print(f"Error inicializando DB: {e}")
+            print(f"❌ Error actualizando tablas: {e}")
             self.conn.rollback()
 
     def query(self, sql, params=()):
@@ -101,7 +104,7 @@ class DatabaseManager:
 db = DatabaseManager()
 
 # ======================================================
-# 🎨 UI HELPERS (ESTILOS UNIFICADOS)
+# 🎨 UI HELPERS (ESTILOS)
 # ======================================================
 class UIHelper:
     @staticmethod
@@ -125,7 +128,7 @@ class UIHelper:
                          font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2", width=width, pady=8)
 
 # ======================================================
-# 📄 GENERADOR DE REPORTES (MEJORADO)
+# 📄 GENERADOR DE REPORTES
 # ======================================================
 class ReportGenerator:
     @staticmethod
@@ -217,7 +220,7 @@ class ReportGenerator:
         except: pass
 
 # ======================================================
-# 🔐 LOGIN DE LUJO (DEL CÓDIGO ANTIGUO)
+# 🔐 LOGIN DE LUJO (SIN BORDES)
 # ======================================================
 class Login(tk.Toplevel):
     def __init__(self, parent):
@@ -238,7 +241,7 @@ class Login(tk.Toplevel):
         # Logo
         tk.Label(main_frame, text="🌱", font=("Arial", 60), bg="white").pack(pady=(60, 10))
         tk.Label(main_frame, text="FAMILY BICONS", font=("Segoe UI", 18, "bold"), bg="white", fg=CONFIG["COLORS"]["primary"]).pack()
-        tk.Label(main_frame, text="v2.0 Platinum", font=("Segoe UI", 9), bg="white", fg="#999").pack(pady=(0, 40))
+        tk.Label(main_frame, text="v3.0 Platinum", font=("Segoe UI", 9), bg="white", fg="#999").pack(pady=(0, 40))
 
         # Inputs
         self.create_entry(main_frame, "USUARIO", False)
@@ -273,7 +276,7 @@ class Login(tk.Toplevel):
         self.parent.destroy()
 
 # ======================================================
-# 📊 PESTAÑAS PRINCIPALES (LÓGICA NUEVA INTEGRADA)
+# 📊 PESTAÑAS PRINCIPALES
 # ======================================================
 
 # --- PESTAÑA 1: DASHBOARD ---
@@ -407,167 +410,230 @@ class TabInvestments(tk.Frame):
         if s := self.tr.selection():
             if messagebox.askyesno("Confirmar", "¿Eliminar socio?"): db.query("DELETE FROM inversiones WHERE id=?", (self.tr.item(s[0])['values'][0],)); self.load()
 
-# --- PESTAÑA 3: CRÉDITOS (CON FIX DE COLUMNA Y NUEVA UI) ---
+# --- PESTAÑA 3: CRÉDITOS (MEJORADA - NORMAL vs EMERGENTE) ---
 class TabDebtors(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent, bg="white")
         
-        # Panel Superior (Búsqueda y Creación)
-        f_top = tk.Frame(self, bg="white"); f_top.pack(fill="x", padx=10, pady=5)
-        
-        # Búsqueda
-        lf_search = tk.LabelFrame(f_top, text="Buscar", bg="white", padx=5, pady=5)
-        lf_search.pack(side="left", fill="y")
-        self.e_s = tk.Entry(lf_search, bd=1, relief="solid", width=20)
-        self.e_s.pack(padx=5, pady=5); self.e_s.bind("<KeyRelease>", lambda e: self.load(self.e_s.get()))
+        # --- PANEL SUPERIOR: BÚSQUEDA Y NUEVO CRÉDITO ---
+        top_panel = tk.Frame(self, bg="white")
+        top_panel.pack(fill="x", padx=10, pady=10)
 
-        # Nuevo Crédito
-        lf_new = tk.LabelFrame(f_top, text="Otorgar Nuevo Crédito", bg="white", padx=5, pady=5)
-        lf_new.pack(side="left", padx=10, fill="x", expand=True)
-        
-        tk.Label(lf_new, text="Cliente:", bg="white").grid(row=0, column=0)
-        self.cb_cli = ttk.Combobox(lf_new, width=15); self.cb_cli.grid(row=0, column=1, padx=5)
-        
-        tk.Label(lf_new, text="Tipo:", bg="white").grid(row=0, column=2)
-        self.cb_tipo = ttk.Combobox(lf_new, values=["Normal", "Emergente"], width=10, state="readonly"); self.cb_tipo.current(0)
+        # 1. Búsqueda
+        lf_search = tk.LabelFrame(top_panel, text="🔍 Buscar Préstamo", bg="white", padx=10, pady=5)
+        lf_search.pack(side="left", fill="y", padx=(0, 10))
+        self.e_s = tk.Entry(lf_search, bd=1, relief="solid", width=25)
+        self.e_s.pack(pady=5)
+        self.e_s.bind("<KeyRelease>", lambda e: self.load(self.e_s.get()))
+
+        # 2. Formulario Nuevo Crédito
+        lf_new = tk.LabelFrame(top_panel, text="💰 Otorgar Nuevo Crédito", bg="white", padx=10, pady=5)
+        lf_new.pack(side="left", fill="both", expand=True)
+
+        tk.Label(lf_new, text="Cliente:", bg="white", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, padx=5, sticky="e")
+        self.cb_cli = ttk.Combobox(lf_new, width=20)
+        self.cb_cli.grid(row=0, column=1, padx=5)
+
+        tk.Label(lf_new, text="Tipo:", bg="white", font=("Segoe UI", 9, "bold")).grid(row=0, column=2, padx=5, sticky="e")
+        self.cb_tipo = ttk.Combobox(lf_new, values=["Normal", "Emergente"], width=12, state="readonly")
+        self.cb_tipo.current(0) # Default Normal
         self.cb_tipo.grid(row=0, column=3, padx=5)
-        
-        tk.Label(lf_new, text="Monto ($):", bg="white").grid(row=0, column=4)
-        self.e_mon = tk.Entry(lf_new, width=8); self.e_mon.grid(row=0, column=5, padx=5)
-        
-        tk.Label(lf_new, text="Plazo:", bg="white").grid(row=0, column=6)
-        self.e_pla = tk.Entry(lf_new, width=4); self.e_pla.grid(row=0, column=7, padx=5)
-        
-        UIHelper.btn(lf_new, "💾 Guardar", self.add, CONFIG["COLORS"]["primary"], 12).grid(row=0, column=8, padx=10)
 
-        # Tabla
-        cols = ("ID", "Nom", "Tipo", "Mon", "Pla", "Est")
-        self.tr = ttk.Treeview(self, columns=cols, show="headings", height=8)
-        self.tr.heading("ID", text="ID"); self.tr.column("ID", width=30)
-        self.tr.heading("Nom", text="Cliente"); self.tr.column("Nom", width=150)
-        self.tr.heading("Tipo", text="Tipo"); self.tr.column("Tipo", width=80)
-        self.tr.heading("Mon", text="Monto"); self.tr.column("Mon", width=80)
-        self.tr.heading("Pla", text="Plazo"); self.tr.column("Pla", width=50)
-        self.tr.heading("Est", text="Estado"); self.tr.column("Est", width=100)
-        self.tr.tag_configure("Pendiente", foreground=CONFIG["COLORS"]["danger"])
-        self.tr.tag_configure("Pagado", foreground=CONFIG["COLORS"]["secondary"])
+        tk.Label(lf_new, text="Monto ($):", bg="white", font=("Segoe UI", 9, "bold")).grid(row=0, column=4, padx=5, sticky="e")
+        self.e_mon = tk.Entry(lf_new, width=10)
+        self.e_mon.grid(row=0, column=5, padx=5)
+
+        tk.Label(lf_new, text="Plazo (Meses):", bg="white", font=("Segoe UI", 9, "bold")).grid(row=0, column=6, padx=5, sticky="e")
+        self.e_pla = tk.Entry(lf_new, width=5)
+        self.e_pla.grid(row=0, column=7, padx=5)
+
+        # Botón Guardar Verde Grande
+        btn_save = tk.Button(lf_new, text="💾 GUARDAR", command=self.add, bg=CONFIG["COLORS"]["primary"], fg="white", 
+                             font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2", padx=15)
+        btn_save.grid(row=0, column=8, padx=15)
+
+        # --- TABLA DE DATOS ---
+        cols = ("ID", "Cliente", "Tipo", "Monto", "Plazo", "Estado")
+        self.tr = ttk.Treeview(self, columns=cols, show="headings", height=10)
+        
+        self.tr.heading("ID", text="ID"); self.tr.column("ID", width=40, anchor="center")
+        self.tr.heading("Cliente", text="CLIENTE"); self.tr.column("Cliente", width=200)
+        self.tr.heading("Tipo", text="TIPO"); self.tr.column("Tipo", width=100, anchor="center")
+        self.tr.heading("Monto", text="MONTO"); self.tr.column("Monto", width=100, anchor="center")
+        self.tr.heading("Plazo", text="PLAZO"); self.tr.column("Plazo", width=60, anchor="center")
+        self.tr.heading("Estado", text="ESTADO"); self.tr.column("Estado", width=100, anchor="center")
+
+        self.tr.tag_configure("Pendiente", foreground="#d32f2f") # Rojo
+        self.tr.tag_configure("Pagado", foreground="#2e7d32")   # Verde
+
         self.tr.pack(fill="both", expand=True, padx=10, pady=5)
 
-        # Botones de Acción
-        f_act = tk.Frame(self, bg="white", pady=5); f_act.pack(fill="x", padx=10)
-        UIHelper.btn(f_act, "📂 Gestionar Pagos / Detalle", self.open_detail, CONFIG["COLORS"]["secondary"], 30).pack(side="left")
-        UIHelper.btn(f_act, "🗑 Eliminar Préstamo", self.dele, CONFIG["COLORS"]["danger"]).pack(side="right")
-        
+        # --- BOTONES DE ACCIÓN INFERIOR ---
+        f_actions = tk.Frame(self, bg="white", pady=10)
+        f_actions.pack(fill="x", padx=10)
+
+        UIHelper.btn(f_actions, "📂 VER DETALLES / PAGAR", self.open_detail, CONFIG["COLORS"]["secondary"], 25).pack(side="left")
+        UIHelper.btn(f_actions, "🗑 ELIMINAR CRÉDITO", self.dele, CONFIG["COLORS"]["danger"], 20).pack(side="right")
+
         self.load()
 
-    def load(self, q=""):
+    def load(self, query=""):
         try: self.cb_cli['values'] = [r[0] for r in db.fetch_all("SELECT nombre FROM inversiones")]
         except: pass
+
         for i in self.tr.get_children(): self.tr.delete(i)
         
         rows = db.fetch_all("SELECT * FROM deudores ORDER BY id DESC")
         for r in rows:
-            # Manejo seguro de índices por si la base de datos aun no se actualizó (aunque debería)
+            id_ = r[0]; nom = r[1]; mont = r[4]; pl = r[3]; est = r[5]
+            # Manejo seguro si la columna tipo aun no se ve (aunque el fix lo arregla)
             tipo = r[6] if len(r) > 6 and r[6] else "Normal"
-            if q.lower() in r[1].lower():
-                self.tr.insert("", "end", values=(r[0], r[1], tipo, f"${r[4]:,.2f}", r[3], r[5]), tags=(r[5],))
+            
+            if query.lower() in nom.lower():
+                self.tr.insert("", "end", values=(id_, nom, tipo, f"${mont:,.2f}", f"{pl} mes(es)", est), tags=(est,))
 
     def add(self):
         try:
-            cli = self.cb_cli.get(); tip = self.cb_tipo.get(); m = self.e_mon.get(); p = self.e_pla.get()
-            if not cli or not m or not p: messagebox.showwarning("Atención", "Faltan datos"); return
-            mes = datetime.now().strftime("%b")
+            cli = self.cb_cli.get()
+            tipo = self.cb_tipo.get()
+            monto = self.e_mon.get()
+            plazo = self.e_pla.get()
+
+            if not cli or not monto or not plazo:
+                messagebox.showwarning("Faltan Datos", "Completa todos los campos.")
+                return
+
+            mes_actual = datetime.now().strftime("%b")
             
-            # INSERT incluye las nuevas columnas 'tipo' y 'cuotas_pagadas'
-            db.query("INSERT INTO deudores (nombre, mes, plazo, monto, estado, tipo, cuotas_pagadas) VALUES (?,?,?,?,?,?,?)", 
-                     (cli, mes, int(p), float(m), "Pendiente", tip, 0))
+            # INSERTAMOS CON LAS NUEVAS COLUMNAS
+            db.query(
+                "INSERT INTO deudores (nombre, mes, plazo, monto, estado, tipo, cuotas_pagadas) VALUES (?,?,?,?,?,?,?)", 
+                (cli, mes_actual, int(plazo), float(monto), "Pendiente", tipo, 0)
+            )
             
-            self.load(); self.e_mon.delete(0, 'end'); self.e_pla.delete(0, 'end')
-            messagebox.showinfo("Éxito", "Crédito guardado.")
+            messagebox.showinfo("Éxito", "✅ Crédito registrado correctamente.")
+            self.e_mon.delete(0, 'end'); self.e_pla.delete(0, 'end')
+            self.load()
+
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo guardar: {e}")
 
     def dele(self):
-        if s := self.tr.selection():
-            if messagebox.askyesno("Confirmar", "¿Eliminar préstamo?"): db.query("DELETE FROM deudores WHERE id=?", (self.tr.item(s[0])['values'][0],)); self.load()
+        sel = self.tr.selection()
+        if not sel: return
+        if messagebox.askyesno("Confirmar", "¿Eliminar crédito?"):
+            id_borrar = self.tr.item(sel[0])['values'][0]
+            db.query("DELETE FROM deudores WHERE id=?", (id_borrar,))
+            self.load()
 
     def open_detail(self):
         sel = self.tr.selection()
-        if not sel: messagebox.showinfo("Info", "Selecciona un crédito"); return
+        if not sel: 
+            messagebox.showinfo("Selección", "Selecciona un crédito."); return
+
         id_ = self.tr.item(sel[0])['values'][0]
-        
         data = db.fetch_all("SELECT * FROM deudores WHERE id=?", (id_,))[0]
-        # Extracción segura
-        nom, plazo, monto, estado = data[1], data[3], data[4], data[5]
-        tipo = data[6] if len(data) > 6 else "Normal"
-        pagadas = data[7] if len(data) > 7 else 0
-        if pagadas is None: pagadas = 0
-
-        win = tk.Toplevel(self); win.title(f"Gestión: {tipo}"); win.geometry("700x500"); UIHelper.center_window(win, 700, 500); win.config(bg="white")
         
-        # Header
-        h = tk.Frame(win, bg=CONFIG["COLORS"]["bg"], pady=10); h.pack(fill="x")
-        tk.Label(h, text=f"{nom}", font=("Arial", 16, "bold"), bg=CONFIG["COLORS"]["bg"], fg=CONFIG['COLORS']['primary']).pack()
-        tk.Label(h, text=f"Monto: ${monto:,.2f} | Tipo: {tipo} | Estado: {estado}", bg=CONFIG["COLORS"]["bg"]).pack()
+        nom = data[1]; plazo = data[3]; monto = data[4]; estado = data[5]
+        tipo = data[6] if len(data) > 6 and data[6] else "Normal"
+        pagadas = data[7] if len(data) > 7 and data[7] is not None else 0
 
-        if tipo == "Emergente": self.build_emergente_ui(win, id_, nom, monto, estado)
-        else: self.build_normal_ui(win, id_, nom, monto, plazo, pagadas)
+        win = tk.Toplevel(self)
+        win.title(f"Gestión de Crédito: {nom}")
+        win.geometry("750x550")
+        UIHelper.center_window(win, 750, 550)
+        win.config(bg="white")
 
-    def build_emergente_ui(self, win, id_, nom, monto, estado):
-        fr = tk.Frame(win, bg="white", pady=20); fr.pack(fill="both", expand=True)
-        interes = monto * 0.05 
-        tk.Label(fr, text="CRÉDITO EMERGENTE (5% Interés)", font=("bold"), bg="white", fg="#f57f17").pack()
-        
-        def p_int():
-            ReportGenerator.print_receipt(nom, f"{interes:.2f}", "Pago Interés (Renovación)", "Emergente")
-        
-        def p_tot():
-            db.query("UPDATE deudores SET estado='Pagado' WHERE id=?", (id_,))
-            ReportGenerator.print_receipt(nom, f"{monto+interes:.2f}", "Cancelación Total", "Emergente")
-            self.load(); win.destroy()
-            
-        UIHelper.btn(fr, f"Pagar Solo Interés (${interes:.2f})", p_int, CONFIG["COLORS"]["accent"], 30).pack(pady=10)
-        UIHelper.btn(fr, f"Liquidar Deuda (${monto+interes:.2f})", p_tot, CONFIG["COLORS"]["primary"], 30).pack(pady=10)
+        header = tk.Frame(win, bg=CONFIG["COLORS"]["bg"], pady=15); header.pack(fill="x")
+        tk.Label(header, text=f"{nom}", font=("Segoe UI", 18, "bold"), bg=CONFIG["COLORS"]["bg"], fg=CONFIG["COLORS"]["primary"]).pack()
+        tk.Label(header, text=f"Tipo: {tipo} | Monto: ${monto:,.2f} | Plazo: {plazo} meses", bg=CONFIG["COLORS"]["bg"], fg="#555").pack()
 
-    def build_normal_ui(self, win, id_, nom, monto, plazo, pagadas):
-        tasa = 5.0; i_rate = tasa / 100
-        cuota = monto * (i_rate * (1 + i_rate)**plazo) / ((1 + i_rate)**plazo - 1)
-        
-        container = tk.Frame(win); container.pack(fill="both", expand=True, padx=20, pady=10)
-        canvas = tk.Canvas(container, bg="white"); scroll = tk.Scrollbar(container, command=canvas.yview)
+        if tipo == "Emergente":
+            self.build_emergente_ui(win, id_, nom, monto, estado)
+        else:
+            self.build_normal_ui(win, id_, nom, monto, plazo, pagadas, estado)
+
+    def build_normal_ui(self, win, id_, nom, monto, plazo, pagadas, estado):
+        frame = tk.Frame(win, bg="white", padx=20, pady=10); frame.pack(fill="both", expand=True)
+
+        tasa = 0.05 
+        cuota_fija = monto * (tasa * (1 + tasa)**plazo) / ((1 + tasa)**plazo - 1)
+
+        canvas = tk.Canvas(frame, bg="white"); scroll = tk.Scrollbar(frame, command=canvas.yview)
         scroll.pack(side="right", fill="y"); canvas.pack(side="left", fill="both", expand=True)
         t_frame = tk.Frame(canvas, bg="white"); canvas.create_window((0,0), window=t_frame, anchor="nw")
         canvas.configure(yscrollcommand=scroll.set)
         t_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
 
-        tk.Label(t_frame, text="#", width=5, font=("bold"), bg="#ddd").grid(row=0, column=0)
-        tk.Label(t_frame, text="Cuota", width=15, font=("bold"), bg="#ddd").grid(row=0, column=1)
-        tk.Label(t_frame, text="Estado", width=15, font=("bold"), bg="#ddd").grid(row=0, column=2)
-        tk.Label(t_frame, text="Acción", width=15, font=("bold"), bg="#ddd").grid(row=0, column=3)
-        
+        headers = ["#", "Cuota", "Interés", "Capital", "Estado", "Acción"]
+        for i, h in enumerate(headers):
+            tk.Label(t_frame, text=h, font=("bold"), bg="#eee", width=12 if h!="Acción" else 15, relief="solid", bd=1).grid(row=0, column=i)
+
         saldo = monto
         for i in range(1, plazo + 1):
-            interes = saldo * i_rate; capital = cuota - interes; saldo -= capital
+            interes = saldo * tasa
+            capital = cuota_fija - interes
+            saldo -= capital
             if i == plazo: capital += saldo; saldo = 0 
-            es_pagado = i <= pagadas
-            bg_col = "#c8e6c9" if es_pagado else "white"
-            
-            tk.Label(t_frame, text=f"{i}", bg=bg_col).grid(row=i, column=0, pady=2)
-            tk.Label(t_frame, text=f"${cuota:,.2f}", bg=bg_col).grid(row=i, column=1, pady=2)
-            tk.Label(t_frame, text="PAGADO" if es_pagado else "PENDIENTE", bg=bg_col, fg="green" if es_pagado else "red").grid(row=i, column=2, pady=2)
-            
-            if not es_pagado and i == pagadas + 1:
-                btn = tk.Button(t_frame, text="Pagar", bg=CONFIG['COLORS']['primary'], fg="white", font=("Arial", 8),
-                                command=lambda n=i, c=cuota: self.pagar_cuota(id_, n, c, nom, plazo, win))
-                btn.grid(row=i, column=3)
-            elif es_pagado:
-                tk.Label(t_frame, text="✔", bg=bg_col).grid(row=i, column=3)
 
-    def pagar_cuota(self, id_, n, val, nom, plazo, win):
-        db.query("UPDATE deudores SET cuotas_pagadas=? WHERE id=?", (n, id_))
-        if n == plazo: db.query("UPDATE deudores SET estado='Pagado' WHERE id=?", (id_,))
-        ReportGenerator.print_receipt(nom, f"{val:,.2f}", f"Pago Cuota #{n}")
-        win.destroy(); self.load(); self.open_detail()
+            es_pagado = i <= pagadas
+            bg_col = "#e8f5e9" if es_pagado else "white"
+            fg_col = "black" if not es_pagado else "#2e7d32"
+            
+            tk.Label(t_frame, text=f"{i}", bg=bg_col, width=12).grid(row=i, column=0, pady=2)
+            tk.Label(t_frame, text=f"${cuota_fija:,.2f}", bg=bg_col, width=12, fg=fg_col).grid(row=i, column=1)
+            tk.Label(t_frame, text=f"${interes:,.2f}", bg=bg_col, width=12, fg="#888").grid(row=i, column=2)
+            tk.Label(t_frame, text=f"${capital:,.2f}", bg=bg_col, width=12, fg="#888").grid(row=i, column=3)
+            
+            est_txt = "PAGADO" if es_pagado else "PENDIENTE"
+            tk.Label(t_frame, text=est_txt, bg=bg_col, fg=fg_col, font=("bold"), width=12).grid(row=i, column=4)
+
+            if not es_pagado and i == pagadas + 1:
+                btn = tk.Button(t_frame, text="✅ PAGAR", bg=CONFIG["COLORS"]["primary"], fg="white", cursor="hand2",
+                                command=lambda n=i, val=cuota_fija: self.pagar_cuota(id_, n, val, nom, plazo, win))
+                btn.grid(row=i, column=5)
+            elif es_pagado:
+                tk.Label(t_frame, text="✔ OK", bg=bg_col, fg="green").grid(row=i, column=5)
+
+    def build_emergente_ui(self, win, id_, nom, monto, estado):
+        frame = tk.Frame(win, bg="white", padx=40, pady=40); frame.pack(fill="both", expand=True)
+        
+        interes_mensual = monto * 0.10 # 10%
+        total_a_liquidar = monto + interes_mensual
+
+        tk.Label(frame, text="⚡ CRÉDITO EMERGENTE", font=("Segoe UI", 16, "bold"), fg="#ffab00", bg="white").pack(pady=10)
+        tk.Label(frame, text=f"Interés mensual: ${interes_mensual:,.2f}", bg="white", fg="#555").pack()
+        
+        info_frame = tk.Frame(frame, bg="#fff8e1", pady=20, relief="solid", bd=1); info_frame.pack(pady=20, fill="x")
+        tk.Label(info_frame, text=f"Deuda Capital: ${monto:,.2f}", bg="#fff8e1", font=("bold")).pack()
+        tk.Label(info_frame, text=f"Estado Actual: {estado}", bg="#fff8e1", fg="red" if estado=="Pendiente" else "green").pack()
+
+        if estado == "Pendiente":
+            def pagar_interes():
+                ReportGenerator.print_receipt(nom, f"{interes_mensual:,.2f}", "Pago Solo Interés (Renovación)", "Emergente")
+                messagebox.showinfo("Renovación", "Recibo generado.")
+
+            def liquidar():
+                if messagebox.askyesno("Confirmar", f"¿Liquidar deuda total por ${total_a_liquidar:,.2f}?"):
+                    db.query("UPDATE deudores SET estado='Pagado' WHERE id=?", (id_,))
+                    ReportGenerator.print_receipt(nom, f"{total_a_liquidar:,.2f}", "Cancelación Total", "Emergente")
+                    messagebox.showinfo("Éxito", "Préstamo cancelado."); win.destroy(); self.load()
+
+            btn_f = tk.Frame(frame, bg="white"); btn_f.pack(pady=20)
+            UIHelper.btn(btn_f, f"Pagar Interés\n(${interes_mensual:,.2f})", pagar_interes, CONFIG["COLORS"]["accent"], 25).pack(side="left", padx=10)
+            UIHelper.btn(btn_f, f"Liquidar Total\n(${total_a_liquidar:,.2f})", liquidar, CONFIG["COLORS"]["primary"], 25).pack(side="left", padx=10)
+        else:
+            tk.Label(frame, text="✅ PAGADO", font=("Arial", 14, "bold"), fg="green", bg="white").pack(pady=30)
+
+    def pagar_cuota(self, id_, num_cuota, valor, nom, plazo_total, win):
+        if messagebox.askyesno("Confirmar", f"¿Registrar pago cuota #{num_cuota}?"):
+            db.query("UPDATE deudores SET cuotas_pagadas=? WHERE id=?", (num_cuota, id_))
+            if num_cuota == plazo_total:
+                db.query("UPDATE deudores SET estado='Pagado' WHERE id=?", (id_,))
+                messagebox.showinfo("Felicidades", "¡Crédito cancelado!")
+            
+            ReportGenerator.print_receipt(nom, f"{valor:,.2f}", f"Pago Cuota #{num_cuota}")
+            win.destroy(); self.load(); self.open_detail()
 
 # --- PESTAÑA 4: SIMULADOR ---
 class TabCalc(tk.Frame):
