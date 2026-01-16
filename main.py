@@ -1,10 +1,20 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-import psycopg2
 import webbrowser
 import tempfile
 import os
 from datetime import datetime
+import sys
+
+# Intento de importar psycopg2 con manejo de error visual
+try:
+    import psycopg2
+except ImportError:
+    # Si falla, creamos una ventanita simple de error
+    root = tk.Tk()
+    root.withdraw()
+    messagebox.showerror("Error Crítico", "Falta la librería 'psycopg2'.\n\nPor favor ejecuta en tu terminal:\npip install psycopg2-binary")
+    sys.exit()
 
 # ======================================================
 # ⚙️ CONFIGURACIÓN "FAMILY BICONS PLATINUM"
@@ -14,13 +24,13 @@ CONFIG = {
     "VALOR_NOMINAL": 5.0,
     "TASA_INTERES_ACCION": 0.20,
     "COLORS": {
-        "sidebar": "#003300",      # Verde muy oscuro para el menú
-        "sidebar_hover": "#004d00", # Efecto hover menú
-        "primary": "#2e7d32",      # Verde principal botones
+        "sidebar": "#003300",
+        "sidebar_hover": "#004d00",
+        "primary": "#2e7d32",
         "primary_hover": "#388e3c",
-        "bg_app": "#f0f2f5",       # Gris azulado muy suave (Moderno)
-        "bg_content": "#ffffff",   # Blanco puro
-        "accent": "#ffab00",       # Dorado
+        "bg_app": "#f0f2f5",
+        "bg_content": "#ffffff",
+        "accent": "#ffab00",
         "text_dark": "#1c1e21",
         "text_light": "#ffffff",
         "danger": "#d32f2f"
@@ -28,35 +38,42 @@ CONFIG = {
 }
 
 # ======================================================
-# 🗄️ GESTOR DE BASE DE DATOS (VERSIÓN ROBUSTA CÓDIGO 2)
+# 🗄️ GESTOR DE BASE DE DATOS
 # ======================================================
 class DatabaseManager:
     def __init__(self):
-        # ⚠️ TU URL DE SUPABASE (CUIDADO AL COMPARTIRLA)
+        # URL DE SUPABASE
         self.DB_URL = "postgresql://postgres.osadlrveedbzfuoctwvz:Balla0605332550@aws-1-us-east-1.pooler.supabase.com:6543/postgres"
         self.conn = None
         self.cursor = None
-        self.conectar_y_reparar()
+        # NO conectamos aquí automáticamente para no congelar la UI al inicio
 
     def conectar_y_reparar(self):
-        """Conecta y asegura que la estructura de la BD sea correcta (Lógica del Cód 2)"""
+        """Intenta conectar. Retorna True si éxito, False si falla."""
         try:
+            if self.conn and not self.conn.closed:
+                return True # Ya conectado
+
+            print("🔄 Conectando a Supabase...")
             self.conn = psycopg2.connect(self.DB_URL)
             self.cursor = self.conn.cursor()
-            print("✅ Conexión establecida a Supabase.")
+            print("✅ Conexión establecida.")
             
-            # Crear tablas base
+            # Crear tablas
             self.cursor.execute('''CREATE TABLE IF NOT EXISTS deudores (id SERIAL PRIMARY KEY, nombre TEXT, mes TEXT, plazo INTEGER, monto REAL, estado TEXT)''')
             self.cursor.execute('''CREATE TABLE IF NOT EXISTS inversiones (id SERIAL PRIMARY KEY, nombre TEXT, valores_meses TEXT)''')
             self.cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (id SERIAL PRIMARY KEY, usuario TEXT, password TEXT)''')
             self.conn.commit()
 
-            # REPARACIÓN: Agregar columnas si faltan (Esto arregla el error del Cód 1)
+            # Reparar columnas
             self._add_column("deudores", "tipo", "TEXT DEFAULT 'Normal'")
             self._add_column("deudores", "cuotas_pagadas", "INTEGER DEFAULT 0")
+            return True
             
         except Exception as e:
             print(f"❌ Error de conexión: {e}")
+            messagebox.showerror("Error de Conexión", f"No se pudo conectar a la base de datos.\nRevisa tu internet.\n\nError: {e}")
+            return False
 
     def _add_column(self, table, col, type_def):
         try:
@@ -65,9 +82,8 @@ class DatabaseManager:
         except: self.conn.rollback()
 
     def query(self, sql, params=()):
-        if not self.conn: 
-            try: self.conectar_y_reparar()
-            except: return None
+        if not self.conn or self.conn.closed: 
+            if not self.conectar_y_reparar(): return None
         try:
             sql_postgres = sql.replace("?", "%s")
             self.cursor.execute(sql_postgres, params)
@@ -79,13 +95,15 @@ class DatabaseManager:
             return None
 
     def fetch_all(self, sql, params=()):
-        if not self.conn: return []
+        if not self.conn or self.conn.closed:
+             if not self.conectar_y_reparar(): return []
         try:
             sql_postgres = sql.replace("?", "%s")
             self.cursor.execute(sql_postgres, params)
             return self.cursor.fetchall()
         except: return []
 
+# Instancia global (pero vacía, conectará después)
 db = DatabaseManager()
 
 # ======================================================
@@ -96,24 +114,9 @@ class UIHelper:
     def style_setup():
         style = ttk.Style()
         style.theme_use("clam")
-        
-        # Estilo Treeview Moderno
-        style.configure("Treeview", 
-                        background="white", 
-                        foreground="#333", 
-                        fieldbackground="white", 
-                        rowheight=35, 
-                        font=('Segoe UI', 10))
-        
-        style.configure("Treeview.Heading", 
-                        background="white", 
-                        foreground="#555", 
-                        font=('Segoe UI', 9, 'bold'),
-                        borderwidth=0)
-        
+        style.configure("Treeview", background="white", foreground="#333", fieldbackground="white", rowheight=35, font=('Segoe UI', 10))
+        style.configure("Treeview.Heading", background="white", foreground="#555", font=('Segoe UI', 9, 'bold'), borderwidth=0)
         style.map("Treeview", background=[('selected', '#e8f5e9')], foreground=[('selected', 'black')])
-        
-        # Quitar bordes feos
         style.layout("Treeview", [('Treeview.treearea', {'sticky': 'nswe'})])
 
     @staticmethod
@@ -123,109 +126,54 @@ class UIHelper:
 
     @staticmethod
     def create_card(parent, title, value, icon, color_stripe):
-        """Crea una tarjeta bonita para el Dashboard"""
         card = tk.Frame(parent, bg="white", highlightbackground="#ddd", highlightthickness=1)
-        
-        # Barra de color superior
         tk.Frame(card, bg=color_stripe, height=4).pack(fill="x")
-        
         content = tk.Frame(card, bg="white", padx=20, pady=20)
         content.pack(fill="both", expand=True)
-        
-        # Icono y Titulo
-        header = tk.Frame(content, bg="white")
-        header.pack(fill="x")
+        header = tk.Frame(content, bg="white"); header.pack(fill="x")
         tk.Label(header, text=icon, font=("Segoe UI Emoji", 24), bg="white").pack(side="left")
         tk.Label(header, text=title, font=("Segoe UI", 10, "bold"), fg="#888", bg="white").pack(side="right", pady=5)
-        
-        # Valor
         tk.Label(content, text=value, font=("Segoe UI", 22, "bold"), fg="#333", bg="white").pack(anchor="w", pady=(10,0))
-        
         return card
 
-# Botón Personalizado con Hover
 class ModernButton(tk.Button):
     def __init__(self, master, text, command, bg_color=CONFIG["COLORS"]["primary"], width=15, **kwargs):
         super().__init__(master, text=text, command=command, bg=bg_color, fg="white", 
                          font=("Segoe UI", 10, "bold"), relief="flat", cursor="hand2", 
                          activebackground=bg_color, activeforeground="white", width=width, pady=8, **kwargs)
         self.bg_color = bg_color
-        self.bind("<Enter>", self.on_enter)
-        self.bind("<Leave>", self.on_leave)
-
-    def on_enter(self, e):
-        # Aclarar un poco el color
-        self['bg'] = "#388e3c" if self.bg_color == CONFIG["COLORS"]["primary"] else "#444" 
-
-    def on_leave(self, e):
-        self['bg'] = self.bg_color
+        self.bind("<Enter>", self.on_enter); self.bind("<Leave>", self.on_leave)
+    def on_enter(self, e): self['bg'] = "#388e3c" if self.bg_color == CONFIG["COLORS"]["primary"] else "#444" 
+    def on_leave(self, e): self['bg'] = self.bg_color
 
 # ======================================================
-# 📄 REPORTES (PDF/HTML)
+# 📄 REPORTES
 # ======================================================
 class ReportGenerator:
     @staticmethod
     def get_header():
-        return f"""
-        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom: 2px solid {CONFIG['COLORS']['primary']}; padding-bottom:10px; margin-bottom:20px;">
+        return f"""<div style="display:flex; justify-content:space-between; align-items:center; border-bottom: 2px solid {CONFIG['COLORS']['primary']}; padding-bottom:10px; margin-bottom:20px;">
             <div style="font-size:24px; font-weight:bold; color:{CONFIG['COLORS']['primary']};">FAMILY BICONS</div>
-            <div style="font-size:12px; color:#666;">Documento Oficial<br>{datetime.now().strftime('%d/%m/%Y')}</div>
-        </div>
-        """
-
+            <div style="font-size:12px; color:#666;">Documento Oficial<br>{datetime.now().strftime('%d/%m/%Y')}</div></div>"""
     @staticmethod
-    def print_amortization(monto, tasa, plazo, datos):
-        rows = "".join([f"<tr><td>{r[0]}</td><td>{r[1]}</td><td>{r[2]}</td><td>{r[3]}</td><td><b>{r[4]}</b></td></tr>" for r in datos])
-        html = f"""
-        <html><body style="font-family:'Segoe UI', sans-serif; padding:40px; background:#f9f9f9;">
-        <div style="background:white; padding:40px; box-shadow:0 0 10px rgba(0,0,0,0.1);">
-            {ReportGenerator.get_header()}
-            <h2 style="text-align:center; color:#333;">TABLA DE AMORTIZACIÓN</h2>
-            <div style="background:#e8f5e9; padding:15px; border-radius:5px; margin-bottom:20px; text-align:center;">
-                <b>Monto:</b> ${monto} &nbsp;|&nbsp; <b>Plazo:</b> {plazo} meses &nbsp;|&nbsp; <b>Tasa:</b> {tasa}%
-            </div>
-            <table style="width:100%; border-collapse:collapse; font-size:13px;">
-                <tr style="background:{CONFIG['COLORS']['primary']}; color:white;">
-                    <th style="padding:10px;">No.</th><th>Saldo</th><th>Interés</th><th>Capital</th><th>Cuota</th>
-                </tr>
-                {rows}
-            </table>
-        </div></body></html>"""
-        ReportGenerator._open(html, "Amortizacion.html")
-
+    def print_amortization(m, t, p, d):
+        r = "".join([f"<tr><td>{x[0]}</td><td>{x[1]}</td><td>{x[2]}</td><td>{x[3]}</td><td><b>{x[4]}</b></td></tr>" for x in d])
+        h = f"""<html><body style="font-family:'Segoe UI';padding:40px;background:#f9f9f9;"><div style="background:white;padding:40px;box-shadow:0 0 10px rgba(0,0,0,0.1);">{ReportGenerator.get_header()}<h2 style="text-align:center;">TABLA DE AMORTIZACIÓN</h2><div style="background:#e8f5e9;padding:15px;text-align:center;"><b>Monto:</b> ${m} | <b>Plazo:</b> {p} m | <b>Tasa:</b> {t}%</div><table style="width:100%;border-collapse:collapse;margin-top:20px;"><tr style="background:{CONFIG['COLORS']['primary']};color:white;"><th>No.</th><th>Saldo</th><th>Interés</th><th>Capital</th><th>Cuota</th></tr>{r}</table></div></body></html>"""
+        ReportGenerator._open(h, "Amortizacion.html")
     @staticmethod
-    def print_receipt(nombre, monto, concepto):
-        html = f"""
-        <html><body style="font-family:'Segoe UI', sans-serif; background:#e0e0e0; display:flex; justify-content:center; padding-top:50px;">
-        <div style="background:white; width:400px; padding:30px; border-radius:8px; box-shadow:0 5px 15px rgba(0,0,0,0.15); border-top:6px solid {CONFIG['COLORS']['primary']};">
-            <div style="text-align:center; margin-bottom:20px;">
-                <span style="font-size:40px;">🌱</span><br>
-                <b style="color:{CONFIG['COLORS']['primary']}; letter-spacing:1px;">FAMILY BICONS</b>
-            </div>
-            <h3 style="text-align:center; margin:0; color:#333;">COMPROBANTE DE PAGO</h3>
-            <div style="margin-top:30px;">
-                <small style="color:#888;">CLIENTE</small><br>
-                <span style="font-size:18px; font-weight:bold;">{nombre}</span>
-            </div>
-            <div style="margin-top:15px;">
-                <small style="color:#888;">CONCEPTO</small><br>
-                <span style="font-size:16px;">{concepto}</span>
-            </div>
-            <div style="margin-top:30px; background:#f1f8e9; color:{CONFIG['COLORS']['primary']}; padding:15px; text-align:center; font-size:26px; font-weight:bold; border:1px dashed #a5d6a7; border-radius:5px;">
-                ${monto}
-            </div>
-            <div style="text-align:center; margin-top:20px; font-size:12px; color:#aaa;">Generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}</div>
-        </div></body></html>"""
-        ReportGenerator._open(html, "Recibo.html")
-
+    def print_receipt(n, m, c):
+        h = f"""<html><body style="font-family:'Segoe UI';background:#e0e0e0;display:flex;justify-content:center;padding-top:50px;"><div style="background:white;width:400px;padding:30px;border-top:6px solid {CONFIG['COLORS']['primary']};"><div style="text-align:center;margin-bottom:20px;"><span style="font-size:40px;">🌱</span><br><b>FAMILY BICONS</b></div><h3 style="text-align:center;">RECIBO</h3><div style="margin-top:30px;"><small style="color:#888;">CLIENTE</small><br><b>{n}</b></div><div style="margin-top:15px;"><small style="color:#888;">CONCEPTO</small><br>{c}</div><div style="margin-top:30px;background:#f1f8e9;color:{CONFIG['COLORS']['primary']};padding:15px;text-align:center;font-size:26px;font-weight:bold;border:1px dashed #a5d6a7;">${m}</div></div></body></html>"""
+        ReportGenerator._open(h, "Recibo.html")
     @staticmethod
-    def _open(content, name):
-        path = os.path.join(tempfile.gettempdir(), name)
-        with open(path, "w", encoding="utf-8") as f: f.write(content)
-        webbrowser.open(f"file:///{path}")
+    def _open(c, n):
+        try:
+            p = os.path.join(tempfile.gettempdir(), n); 
+            with open(p, "w", encoding="utf-8") as f: f.write(c)
+            webbrowser.open(f"file:///{p}")
+        except: pass
 
 # ======================================================
-# 🔐 LOGIN (ESTÉTICA CÓDIGO 1 - MANTENIDA)
+# 🔐 LOGIN
 # ======================================================
 class Login(tk.Toplevel):
     def __init__(self, parent):
@@ -236,360 +184,182 @@ class Login(tk.Toplevel):
         UIHelper.center_window(self, 400, 550)
         self.config(bg=CONFIG["COLORS"]["sidebar"])
         
-        main = tk.Frame(self, bg="white")
-        main.pack(expand=True, fill="both", padx=2, pady=2)
-        
-        tk.Button(main, text="✕", command=lambda: self.parent.destroy(), bg="white", bd=0, font=("Arial", 14), fg="#999", cursor="hand2").place(x=360, y=10)
+        main = tk.Frame(self, bg="white"); main.pack(expand=True, fill="both", padx=2, pady=2)
+        tk.Button(main, text="✕", command=self.exit_app, bg="white", bd=0, font=("Arial", 14), fg="#999").place(x=360, y=10)
         
         tk.Label(main, text="🌱", font=("Segoe UI Emoji", 60), bg="white").pack(pady=(60, 10))
         tk.Label(main, text="FAMILY BICONS", font=("Segoe UI", 18, "bold"), bg="white", fg=CONFIG["COLORS"]["sidebar"]).pack()
         tk.Label(main, text="Enterprise Edition", font=("Segoe UI", 10), bg="white", fg="#777").pack(pady=(0,40))
 
-        self.user = self._mk_entry(main, "USUARIO", False)
-        self.user.focus()
-        self.pasw = self._mk_entry(main, "CONTRASEÑA", True)
-
+        self.u = self._mk_entry(main, "USUARIO", False); self.u.focus()
+        self.p = self._mk_entry(main, "CONTRASEÑA", True)
         ModernButton(main, "INICIAR SESIÓN", self.check, bg_color=CONFIG["COLORS"]["sidebar"], width=25).pack(pady=40)
         self.bind('<Return>', lambda e: self.check())
 
-    def _mk_entry(self, p, t, mask):
+    def _mk_entry(self, p, t, m):
         f = tk.Frame(p, bg="white", padx=40); f.pack(fill="x", pady=10)
         tk.Label(f, text=t, font=("Segoe UI", 8, "bold"), bg="white", fg="#aaa").pack(anchor="w")
-        e = tk.Entry(f, font=("Segoe UI", 11), bg="#f9f9f9", bd=0, show="•" if mask else "")
-        e.pack(fill="x", ipady=5)
+        e = tk.Entry(f, font=("Segoe UI", 11), bg="#f9f9f9", bd=0, show="•" if m else ""); e.pack(fill="x", ipady=5)
         tk.Frame(f, bg=CONFIG["COLORS"]["sidebar"], height=2).pack(fill="x")
         return e
 
     def check(self):
-        if self.user.get() == "admin" and self.pasw.get() == "1234":
-            self.destroy(); self.parent.deiconify()
+        # Intentar conectar a BD al hacer login, no antes
+        print("🔑 Intentando conectar a DB en Login...")
+        if not db.conectar_y_reparar():
+            return # El error ya se mostró en el messagebox
+
+        if self.u.get() == "admin" and self.p.get() == "1234":
+            self.destroy(); self.parent.deiconify(); self.parent.init_dashboard()
         else: messagebox.showerror("Error", "Credenciales Incorrectas")
+    
+    def exit_app(self):
+        self.parent.destroy()
 
 # ======================================================
-# 🏠 PANTALLAS (FRAMES)
+# 🏠 PANTALLAS
 # ======================================================
-
-# --- DASHBOARD ---
 class PageDashboard(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent, bg=CONFIG["COLORS"]["bg_app"])
         tk.Label(self, text="Resumen General", font=("Segoe UI", 20, "bold"), bg=CONFIG["COLORS"]["bg_app"], fg="#333").pack(anchor="w", padx=30, pady=(30,20))
-        
-        self.grid_frame = tk.Frame(self, bg=CONFIG["COLORS"]["bg_app"])
-        self.grid_frame.pack(fill="x", padx=30)
-        
+        self.grid = tk.Frame(self, bg=CONFIG["COLORS"]["bg_app"]); self.grid.pack(fill="x", padx=30)
         ModernButton(self, "🔄 Actualizar Datos", self.refresh, CONFIG["COLORS"]["sidebar"]).pack(anchor="w", padx=30, pady=20)
         self.refresh()
-
     def refresh(self):
-        for w in self.grid_frame.winfo_children(): w.destroy()
-        
-        # Lógica del Código 2
-        rows = db.fetch_all("SELECT valores_meses FROM inversiones")
-        acciones = sum([sum([float(x) for x in r[0].split(",")]) for r in rows])
-        capital = acciones * CONFIG['VALOR_NOMINAL']
-        
-        ganancias = 0
-        for r in rows:
-            vals = [float(x) for x in r[0].split(",")]
-            for i, v in enumerate(vals): ganancias += (v * CONFIG['TASA_INTERES_ACCION'] * (12 - i))
-            
-        deuda = sum([r[0] for r in db.fetch_all("SELECT monto FROM deudores WHERE estado='Pendiente'")])
-        
-        # Tarjetas
-        UIHelper.create_card(self.grid_frame, "CAPITAL SOCIAL", f"${capital:,.2f}", "💰", "#2e7d32").pack(side="left", fill="both", expand=True, padx=10)
-        UIHelper.create_card(self.grid_frame, "GANANCIA GENERADA", f"${ganancias:,.2f}", "📈", "#fbc02d").pack(side="left", fill="both", expand=True, padx=10)
-        UIHelper.create_card(self.grid_frame, "POR COBRAR", f"${deuda:,.2f}", "📉", "#d32f2f").pack(side="left", fill="both", expand=True, padx=10)
+        for w in self.grid.winfo_children(): w.destroy()
+        r = db.fetch_all("SELECT valores_meses FROM inversiones")
+        if not r: return
+        acc = sum([sum([float(x) for x in z[0].split(",")]) for z in r])
+        gan = 0
+        for z in r:
+            v = [float(x) for x in z[0].split(",")]
+            for i, val in enumerate(v): gan += (val * CONFIG['TASA_INTERES_ACCION'] * (12 - i))
+        deu = sum([z[0] for z in db.fetch_all("SELECT monto FROM deudores WHERE estado='Pendiente'")])
+        UIHelper.create_card(self.grid, "CAPITAL SOCIAL", f"${acc*CONFIG['VALOR_NOMINAL']:,.2f}", "💰", "#2e7d32").pack(side="left", fill="both", expand=True, padx=10)
+        UIHelper.create_card(self.grid, "GANANCIA GENERADA", f"${gan:,.2f}", "📈", "#fbc02d").pack(side="left", fill="both", expand=True, padx=10)
+        UIHelper.create_card(self.grid, "POR COBRAR", f"${deu:,.2f}", "📉", "#d32f2f").pack(side="left", fill="both", expand=True, padx=10)
 
-# --- INVERSIONES ---
 class PageInversiones(tk.Frame):
-    def __init__(self, parent):
-        super().__init__(parent, bg="white")
-        # Header
-        top = tk.Frame(self, bg="white", pady=20, padx=20)
-        top.pack(fill="x")
+    def __init__(self, p):
+        super().__init__(p, bg="white")
+        top = tk.Frame(self, bg="white", pady=20, padx=20); top.pack(fill="x")
         tk.Label(top, text="Gestión de Acciones", font=("Segoe UI", 18, "bold"), bg="white").pack(side="left")
-        
-        # Controls
         ctrl = tk.Frame(self, bg="#f9f9f9", pady=10, padx=20); ctrl.pack(fill="x")
-        self.e_nom = tk.Entry(ctrl, width=20, font=("Segoe UI", 10)); self.e_nom.pack(side="left", padx=5)
-        ModernButton(ctrl, "➕ Nuevo Socio", self.add, width=12).pack(side="left")
-        
-        self.mode = 0
-        self.btn_mode = ModernButton(ctrl, "🔢 Ver: Cantidad", self.toggle, CONFIG["COLORS"]["accent"], width=15)
-        self.btn_mode.pack(side="right")
-        
-        # Table
-        self.tree = ttk.Treeview(self, columns=["ID","Socio"]+[f"M{i}" for i in range(1,13)]+["TOT"], show="headings", height=15)
-        self.tree.heading("ID", text="#"); self.tree.column("ID", width=30)
-        self.tree.heading("Socio", text="SOCIO"); self.tree.column("Socio", width=150)
-        self.tree.heading("TOT", text="TOTAL"); self.tree.column("TOT", width=80)
-        meses = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]
-        for i, m in enumerate(meses):
-            col = f"M{i+1}"
-            self.tree.heading(col, text=m)
-            self.tree.column(col, width=40, anchor="center")
-        
-        self.tree.pack(fill="both", expand=True, padx=20, pady=10)
-        
-        # Footer Actions
+        self.en = tk.Entry(ctrl, width=20); self.en.pack(side="left", padx=5)
+        ModernButton(ctrl, "➕ Nuevo", self.add, width=12).pack(side="left")
+        self.mode = 0; self.bm = ModernButton(ctrl, "🔢 Ver: Cantidad", self.tog, CONFIG["COLORS"]["accent"], width=15); self.bm.pack(side="right")
+        self.tr = ttk.Treeview(self, columns=["ID","Socio"]+[f"M{i}" for i in range(1,13)]+["TOT"], show="headings", height=15)
+        self.tr.heading("ID", text="#"); self.tr.column("ID", width=30); self.tr.heading("Socio", text="SOCIO"); self.tr.column("Socio", width=150)
+        self.tr.heading("TOT", text="TOT"); self.tr.column("TOT", width=80)
+        for i, m in enumerate(["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]): self.tr.heading(f"M{i+1}", text=m); self.tr.column(f"M{i+1}", width=40)
+        self.tr.pack(fill="both", expand=True, padx=20, pady=10)
         foot = tk.Frame(self, bg="white", pady=10); foot.pack(fill="x", padx=20)
-        ModernButton(foot, "✏️ Editar Selección", self.edit, CONFIG["COLORS"]["primary"]).pack(side="left")
-        ModernButton(foot, "🗑 Eliminar", self.delete, CONFIG["COLORS"]["danger"]).pack(side="right")
+        ModernButton(foot, "✏️ Editar", self.edit, CONFIG["COLORS"]["primary"]).pack(side="left")
+        ModernButton(foot, "🗑 Eliminar", self.dele, CONFIG["COLORS"]["danger"]).pack(side="right")
         self.load()
-
     def load(self):
-        for i in self.tree.get_children(): self.tree.delete(i)
+        for i in self.tr.get_children(): self.tr.delete(i)
         for r in db.fetch_all("SELECT * FROM inversiones ORDER BY id"):
             v = [float(x) for x in r[2].split(",")]
-            if self.mode == 0: d = [int(x) for x in v]; t = int(sum(v))
-            elif self.mode == 1: d = [f"${x*CONFIG['VALOR_NOMINAL']:.0f}" for x in v]; t = f"${sum(v)*CONFIG['VALOR_NOMINAL']:.0f}"
-            else: 
-                g = [(v[i] * CONFIG['TASA_INTERES_ACCION'] * (12-i)) for i in range(12)]
-                d = [f"${x:.1f}" if x>0 else "-" for x in g]; t = f"${sum(g):.2f}"
-            
-            self.tree.insert("", "end", values=(r[0], r[1], *d, t))
-
+            if self.mode==0: d=[int(x) for x in v]; t=int(sum(v))
+            elif self.mode==1: d=[f"${x*CONFIG['VALOR_NOMINAL']:.0f}" for x in v]; t=f"${sum(v)*CONFIG['VALOR_NOMINAL']:.0f}"
+            else: g=[(v[i]*CONFIG['TASA_INTERES_ACCION']*(12-i)) for i in range(12)]; d=[f"${x:.1f}" if x>0 else "-" for x in g]; t=f"${sum(g):.2f}"
+            self.tr.insert("", "end", values=(r[0], r[1], *d, t))
     def add(self):
-        if self.e_nom.get():
-            db.query("INSERT INTO inversiones (nombre, valores_meses) VALUES (?,?)", (self.e_nom.get(), ",".join(["0"]*12)))
-            self.e_nom.delete(0, 'end'); self.load()
-
-    def toggle(self):
-        self.mode = (self.mode + 1) % 3
-        txt = ["🔢 Ver: Cantidad", "💵 Ver: Capital", "📈 Ver: Ganancia"]
-        self.btn_mode.config(text=txt[self.mode])
-        self.load()
-
+        if self.en.get(): db.query("INSERT INTO inversiones (nombre, valores_meses) VALUES (?,?)", (self.en.get(), ",".join(["0"]*12))); self.en.delete(0,'end'); self.load()
+    def tog(self): self.mode=(self.mode+1)%3; self.bm.config(text=["🔢 Ver: Cantidad","💵 Ver: Capital","📈 Ver: Ganancia"][self.mode]); self.load()
+    def dele(self):
+        if s:=self.tr.selection(): db.query("DELETE FROM inversiones WHERE id=?", (self.tr.item(s[0])['values'][0],)); self.load()
     def edit(self):
-        sel = self.tree.selection()
-        if not sel: return
-        item = self.tree.item(sel[0])['values']
-        id_, nom = item[0], item[1]
-        
-        # Popup edición
-        win = tk.Toplevel(self); UIHelper.center_window(win, 500, 200); win.title(f"Editando: {nom}")
-        win.config(bg="white")
-        grid = tk.Frame(win, bg="white", pady=20); grid.pack()
-        
+        if not (s:=self.tr.selection()): return
+        id_, nom = self.tr.item(s[0])['values'][:2]
+        win = tk.Toplevel(self); UIHelper.center_window(win, 500, 200); win.config(bg="white")
+        g = tk.Frame(win, bg="white", pady=20); g.pack()
         curr = db.fetch_all("SELECT valores_meses FROM inversiones WHERE id=?", (id_,))[0][0].split(",")
-        entries = []
-        meses = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]
-        
-        for i, m in enumerate(meses):
-            r, c = (0, i) if i < 6 else (2, i-6)
-            tk.Label(grid, text=m, bg="white", font=("Arial",8)).grid(row=r, column=c)
-            e = tk.Entry(grid, width=5); e.insert(0, str(int(float(curr[i])))); e.grid(row=r+1, column=c, padx=2, pady=5)
-            entries.append(e)
+        ents = []
+        for i, m in enumerate(["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]):
+            r, c = (0, i) if i<6 else (2, i-6)
+            tk.Label(g, text=m, bg="white", font=("Arial",8)).grid(row=r, column=c)
+            e=tk.Entry(g, width=5); e.insert(0, str(int(float(curr[i])))); e.grid(row=r+1, column=c, padx=2); ents.append(e)
+        def sv(): db.query("UPDATE inversiones SET valores_meses=? WHERE id=?", (",".join([e.get() for e in ents]), id_)); self.load(); win.destroy()
+        ModernButton(win, "Guardar", sv).pack(pady=10)
 
-        def save():
-            vals = ",".join([e.get() for e in entries])
-            db.query("UPDATE inversiones SET valores_meses=? WHERE id=?", (vals, id_))
-            self.load(); win.destroy()
-
-        ModernButton(win, "Guardar Cambios", save).pack(pady=10)
-
-    def delete(self):
-        sel = self.tree.selection()
-        if sel and messagebox.askyesno("Confirmar", "¿Eliminar socio?"):
-            db.query("DELETE FROM inversiones WHERE id=?", (self.tree.item(sel[0])['values'][0],))
-            self.load()
-
-# --- CREDITOS ---
 class PageCreditos(tk.Frame):
-    def __init__(self, parent):
-        super().__init__(parent, bg="white")
-        top = tk.Frame(self, bg="white", pady=20, padx=20); top.pack(fill="x")
-        tk.Label(top, text="Cartera de Créditos", font=("Segoe UI", 18, "bold"), bg="white").pack(side="left")
-
-        # Formulario rápido
-        form = tk.LabelFrame(self, text="Otorgar Crédito", bg="white", padx=10, pady=10); form.pack(fill="x", padx=20)
-        self.cb_cli = ttk.Combobox(form, width=20)
-        self.cb_cli.grid(row=0, column=0, padx=5); self.cb_cli.set("Seleccionar Socio...")
-        
-        self.cb_tipo = ttk.Combobox(form, values=["Normal", "Emergente"], width=10, state="readonly")
-        self.cb_tipo.current(0); self.cb_tipo.grid(row=0, column=1, padx=5)
-        
-        self.e_monto = tk.Entry(form, width=10); self.e_monto.grid(row=0, column=2, padx=5)
-        tk.Label(form, text="$", bg="white").grid(row=0, column=3)
-        self.e_plazo = tk.Entry(form, width=5); self.e_plazo.grid(row=0, column=4, padx=5)
-        tk.Label(form, text="meses", bg="white").grid(row=0, column=5)
-        
-        ModernButton(form, "Guardar", self.add, width=10).grid(row=0, column=6, padx=20)
-
-        # Tabla
-        self.tree = ttk.Treeview(self, columns=("ID","Nom","Tipo","Mon","Pla","Est"), show="headings", height=10)
-        self.tree.heading("ID", text="ID"); self.tree.column("ID", width=30)
-        self.tree.heading("Nom", text="CLIENTE"); self.tree.column("Nom", width=150)
-        self.tree.heading("Tipo", text="TIPO"); self.tree.column("Tipo", width=80)
-        self.tree.heading("Mon", text="MONTO"); self.tree.column("Mon", width=80)
-        self.tree.heading("Pla", text="PLAZO"); self.tree.column("Pla", width=50)
-        self.tree.heading("Est", text="ESTADO"); self.tree.column("Est", width=100)
-        
-        self.tree.tag_configure("Pendiente", foreground="#d32f2f"); self.tree.tag_configure("Pagado", foreground="green")
-        self.tree.pack(fill="both", expand=True, padx=20, pady=10)
-
-        # Acciones
-        btns = tk.Frame(self, bg="white", pady=10); btns.pack(fill="x", padx=20)
-        ModernButton(btns, "📂 Gestionar / Pagar", self.gestionar, CONFIG["COLORS"]["accent"]).pack(side="left")
-        ModernButton(btns, "🗑 Eliminar", self.delete, CONFIG["COLORS"]["danger"]).pack(side="right")
-        
+    def __init__(self, p):
+        super().__init__(p, bg="white")
+        tk.Label(tk.Frame(self, bg="white", pady=20, padx=20, name="h").pack(fill="x"), text="Cartera Créditos", font=("Segoe UI", 18, "bold"), bg="white").pack(side="left")
+        f = tk.LabelFrame(self, text="Otorgar", bg="white", padx=10, pady=10); f.pack(fill="x", padx=20)
+        self.cc = ttk.Combobox(f, width=20); self.cc.grid(row=0, column=0); self.ct = ttk.Combobox(f, values=["Normal","Emergente"], width=10); self.ct.current(0); self.ct.grid(row=0, column=1)
+        self.em = tk.Entry(f, width=10); self.em.grid(row=0, column=2); self.ep = tk.Entry(f, width=5); self.ep.grid(row=0, column=3)
+        ModernButton(f, "Guardar", self.ad, width=10).grid(row=0, column=4, padx=10)
+        self.tr = ttk.Treeview(self, columns=("ID","Nom","Tipo","Mon","Pla","Est"), show="headings", height=10)
+        for c,w in [("ID",30),("Nom",150),("Tipo",80),("Mon",80),("Pla",50),("Est",100)]: self.tr.heading(c, text=c); self.tr.column(c, width=w)
+        self.tr.pack(fill="both", expand=True, padx=20, pady=10)
+        b = tk.Frame(self, bg="white", pady=10); b.pack(fill="x", padx=20)
+        ModernButton(b, "📂 Gestionar", self.ges, CONFIG["COLORS"]["accent"]).pack(side="left")
+        ModernButton(b, "🗑 Eliminar", self.dele, CONFIG["COLORS"]["danger"]).pack(side="right")
         self.load()
-
     def load(self):
-        # Actualizar lista socios
-        try: self.cb_cli['values'] = [r[0] for r in db.fetch_all("SELECT nombre FROM inversiones")]
+        try: self.cc['values'] = [r[0] for r in db.fetch_all("SELECT nombre FROM inversiones")]
         except: pass
-        
-        for i in self.tree.get_children(): self.tree.delete(i)
-        for r in db.fetch_all("SELECT * FROM deudores ORDER BY id DESC"):
-            # Mapeo seguro para evitar error del Cód 1 si faltan columnas (aunque DBManager ya lo repara)
-            tipo = r[6] if len(r)>6 and r[6] else "Normal"
-            self.tree.insert("", "end", values=(r[0], r[1], tipo, f"${r[4]:,.2f}", r[3], r[5]), tags=(r[5],))
+        for i in self.tr.get_children(): self.tr.delete(i)
+        for r in db.fetch_all("SELECT * FROM deudores ORDER BY id DESC"): self.tr.insert("", "end", values=(r[0], r[1], r[6] or "Normal", f"${r[4]:,.2f}", r[3], r[5]))
+    def ad(self):
+        try: db.query("INSERT INTO deudores (nombre, mes, plazo, monto, estado, tipo, cuotas_pagadas) VALUES (?,?,?,?,?,?,0)", (self.cc.get(), datetime.now().strftime("%b"), int(self.ep.get()), float(self.em.get()), "Pendiente", self.ct.get())); self.load()
+        except: pass
+    def dele(self):
+        if s:=self.tr.selection(): db.query("DELETE FROM deudores WHERE id=?", (self.tr.item(s[0])['values'][0],)); self.load()
+    def ges(self):
+        if not (s:=self.tr.selection()): return
+        id_ = self.tr.item(s[0])['values'][0]; d = db.fetch_all("SELECT * FROM deudores WHERE id=?", (id_,))[0]
+        w = tk.Toplevel(self); UIHelper.center_window(w, 600, 400); w.config(bg="white")
+        if (d[6] or "Normal") == "Emergente":
+            i = d[4]*0.05
+            tk.Label(w, text=f"Emergente: {d[1]}", font=("bold"), bg="white").pack(pady=10)
+            ModernButton(w, f"Pagar Interés (${i:.2f})", lambda: ReportGenerator.print_receipt(d[1], f"{i:.2f}", "Interés"), CONFIG["COLORS"]["accent"]).pack(pady=5)
+            ModernButton(w, f"Cancelar Total (${d[4]+i:.2f})", lambda: [db.query("UPDATE deudores SET estado='Pagado' WHERE id=?", (id_,)), ReportGenerator.print_receipt(d[1], f"{d[4]+i:.2f}", "Total"), self.load(), w.destroy()], CONFIG["COLORS"]["primary"]).pack(pady=5)
+        else:
+            c = tk.Canvas(w, bg="white"); sc = tk.Scrollbar(w, command=c.yview); fr = tk.Frame(c, bg="white")
+            c.create_window((0,0), window=fr, anchor="nw"); sc.pack(side="right", fill="y"); c.pack(side="left", fill="both", expand=True); c.configure(yscrollcommand=sc.set)
+            fr.bind("<Configure>", lambda e: c.configure(scrollregion=c.bbox("all")))
+            rt = 0.05; cu = d[4]*(rt*(1+rt)**d[3])/((1+rt)**d[3]-1); sal = d[4]; pd = d[7] or 0
+            for i in range(1, d[3]+1):
+                it = sal*rt; cp = cu-it; sal -= cp; txt = "✅" if i<=pd else "Pagar"
+                tk.Label(fr, text=f"#{i} ${cu:.2f}", bg="white").grid(row=i, column=0, padx=10, pady=5)
+                if i == pd+1: ModernButton(fr, "Pagar", lambda n=i: [db.query("UPDATE deudores SET cuotas_pagadas=?, estado=? WHERE id=?", (n, 'Pagado' if n==d[3] else 'Pendiente', id_)), ReportGenerator.print_receipt(d[1], f"{cu:.2f}", f"C{n}"), self.load(), w.destroy()], width=8).grid(row=i, column=1)
+                else: tk.Label(fr, text=txt, bg="white").grid(row=i, column=1)
 
-    def add(self):
-        try:
-            m = float(self.e_monto.get()); p = int(self.e_plazo.get()); nom = self.cb_cli.get()
-            mes = datetime.now().strftime("%b")
-            db.query("INSERT INTO deudores (nombre, mes, plazo, monto, estado, tipo, cuotas_pagadas) VALUES (?,?,?,?,?,?,?)", 
-                     (nom, mes, p, m, "Pendiente", self.cb_tipo.get(), 0))
-            self.load(); self.e_monto.delete(0,'end')
-        except: messagebox.showerror("Error", "Verifica los datos")
-
-    def delete(self):
-        sel = self.tree.selection()
-        if sel and messagebox.askyesno("Borrar", "¿Eliminar crédito?"):
-            db.query("DELETE FROM deudores WHERE id=?", (self.tree.item(sel[0])['values'][0],))
-            self.load()
-
-    def gestionar(self):
-        sel = self.tree.selection()
-        if not sel: return
-        id_ = self.tree.item(sel[0])['values'][0]
-        data = db.fetch_all("SELECT * FROM deudores WHERE id=?", (id_,))[0]
-        
-        # Ventana de Pago
-        win = tk.Toplevel(self); UIHelper.center_window(win, 600, 400); win.config(bg="white"); win.title("Gestión de Pagos")
-        
-        tipo = data[6] if data[6] else "Normal"
-        tk.Label(win, text=f"Crédito {tipo} - {data[1]}", font=("Segoe UI", 14, "bold"), bg="white", fg=CONFIG["COLORS"]["primary"]).pack(pady=10)
-        
-        if tipo == "Emergente":
-            interes = data[4] * 0.05
-            f = tk.Frame(win, bg="#fff3e0", pady=20, padx=20); f.pack(fill="both", expand=True, padx=20, pady=10)
-            tk.Label(f, text=f"Deuda Total: ${data[4]:,.2f}", font=("Arial",12), bg="#fff3e0").pack()
-            tk.Label(f, text=f"Interés Renovación: ${interes:,.2f}", font=("Arial",12), bg="#fff3e0").pack()
-            
-            def p_int(): ReportGenerator.print_receipt(data[1], f"{interes:.2f}", "Pago Interés Emergente")
-            def p_tot():
-                db.query("UPDATE deudores SET estado='Pagado' WHERE id=?", (id_,))
-                ReportGenerator.print_receipt(data[1], f"{data[4]+interes:.2f}", "Cancelación Total Emergente")
-                self.load(); win.destroy()
-            
-            ModernButton(f, "Pagar Interés", p_int, CONFIG["COLORS"]["accent"]).pack(pady=10)
-            ModernButton(f, "Cancelar Deuda", p_tot, CONFIG["COLORS"]["primary"]).pack(pady=5)
-            
-        else: # Normal
-            canvas = tk.Canvas(win, bg="white"); scroll = tk.Scrollbar(win, command=canvas.yview)
-            fr = tk.Frame(canvas, bg="white"); canvas.create_window((0,0), window=fr, anchor="nw")
-            scroll.pack(side="right", fill="y"); canvas.pack(side="left", fill="both", expand=True)
-            canvas.configure(yscrollcommand=scroll.set); fr.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-            
-            tasa = 0.05
-            cuota = data[4] * (tasa * (1+tasa)**data[3]) / ((1+tasa)**data[3] - 1)
-            saldo = data[4]
-            pagadas = data[7] if data[7] else 0
-            
-            # Cabecera tabla pagos
-            tk.Label(fr, text="#", width=5, font=("bold"), bg="#eee").grid(row=0,column=0)
-            tk.Label(fr, text="Cuota", width=15, font=("bold"), bg="#eee").grid(row=0,column=1)
-            tk.Label(fr, text="Acción", width=15, font=("bold"), bg="#eee").grid(row=0,column=2)
-
-            for i in range(1, data[3]+1):
-                interes = saldo * tasa; capital = cuota - interes; saldo -= capital
-                if i==data[3]: capital+=saldo; saldo=0
-                
-                tk.Label(fr, text=str(i), bg="white").grid(row=i, column=0, pady=5)
-                tk.Label(fr, text=f"${cuota:,.2f}", bg="white").grid(row=i, column=1)
-                
-                if i <= pagadas:
-                    tk.Label(fr, text="✅ PAGADO", fg="green", bg="white").grid(row=i, column=2)
-                elif i == pagadas + 1:
-                    def pagar(n=i, c=cuota):
-                        db.query("UPDATE deudores SET cuotas_pagadas=? WHERE id=?", (n, id_))
-                        if n == data[3]: db.query("UPDATE deudores SET estado='Pagado' WHERE id=?", (id_,))
-                        ReportGenerator.print_receipt(data[1], f"{c:.2f}", f"Cuota #{n}")
-                        self.load(); win.destroy()
-                    ModernButton(fr, "Pagar", pagar, width=10).grid(row=i, column=2)
-                else:
-                    tk.Label(fr, text="Pendiente", fg="#ccc", bg="white").grid(row=i, column=2)
-
-# --- SIMULADOR ---
 class PageSimulador(tk.Frame):
-    def __init__(self, parent):
-        super().__init__(parent, bg="white")
-        tk.Label(self, text="Simulador de Crédito", font=("Segoe UI", 18, "bold"), bg="white").pack(pady=20)
-        
-        f = tk.Frame(self, bg="#f5f5f5", padx=20, pady=20); f.pack()
-        self.ents = {}
-        for l in ["Monto ($)", "Tasa Mensual (%)", "Plazo (Meses)"]:
-            tk.Label(f, text=l, bg="#f5f5f5").pack()
-            e = tk.Entry(f, width=15, justify="center", font=("Segoe UI", 11)); e.pack(pady=(0,10))
-            self.ents[l] = e
-            
-        ModernButton(f, "Generar Tabla", self.calc).pack(pady=10)
-        self.btn_print = ModernButton(f, "🖨️ Imprimir PDF", self.print_pdf, CONFIG["COLORS"]["accent"])
-        self.btn_print.pack(); self.btn_print["state"] = "disabled"
-
+    def __init__(self, p):
+        super().__init__(p, bg="white")
+        tk.Label(self, text="Simulador", font=("bold", 18), bg="white").pack(pady=20)
+        f = tk.Frame(self, bg="#eee", padx=20, pady=20); f.pack()
+        self.e = {l: tk.Entry(f, width=15) for l in ["Monto", "Tasa %", "Plazo"]}
+        for l, e in self.e.items(): tk.Label(f, text=l).pack(); e.pack()
+        ModernButton(f, "Calcular", self.calc).pack(pady=10)
     def calc(self):
         try:
-            m = float(self.ents["Monto ($)"].get())
-            t = float(self.ents["Tasa Mensual (%)"].get())/100
-            p = int(self.ents["Plazo (Meses)"].get())
-            c = m * (t * (1 + t)**p) / ((1 + t)**p - 1)
-            
-            saldo = m; self.data = []
-            for i in range(1, p+1):
-                interes = saldo * t; cap = c - interes; saldo -= cap
-                if i==p: cap+=saldo; saldo=0
-                self.data.append((i, f"${saldo+cap:,.2f}", f"${interes:,.2f}", f"${cap:,.2f}", f"${c:,.2f}"))
-            
-            self.btn_print["state"] = "normal"
-            ReportGenerator.print_amortization(m, t*100, p, self.data) # Preview directo
-        except: messagebox.showerror("Error", "Datos numéricos inválidos")
-
-    def print_pdf(self):
-        self.calc()
-
-# --- USUARIOS ---
-class PageUsuarios(tk.Frame):
-    def __init__(self, parent):
-        super().__init__(parent, bg="white")
-        tk.Label(self, text="Accesos Web", font=("Segoe UI", 18, "bold"), bg="white").pack(pady=20)
-        f = tk.Frame(self, bg="#f9f9f9", padx=30, pady=30, bd=1, relief="solid"); f.pack()
-        
-        tk.Label(f, text="Socio:", bg="#f9f9f9").pack(anchor="w")
-        self.cb = ttk.Combobox(f, width=25); self.cb.pack(pady=(0,10))
-        
-        tk.Label(f, text="Contraseña:", bg="#f9f9f9").pack(anchor="w")
-        self.ep = tk.Entry(f, width=27); self.ep.pack(pady=(0,20))
-        
-        ModernButton(f, "Crear / Actualizar", self.save).pack()
-        ModernButton(self, "🔄 Actualizar Lista", self.load, "white").pack(pady=10) # Boton blanco truco
-        self.load()
-
-    def load(self):
-        try: self.cb['values'] = [r[0] for r in db.fetch_all("SELECT nombre FROM inversiones")]
+            m=float(self.e["Monto"].get()); t=float(self.e["Tasa %"].get())/100; p=int(self.e["Plazo"].get()); c=m*(t*(1+t)**p)/((1+t)**p-1)
+            d=[]; s=m
+            for i in range(1, p+1): it=s*t; cp=c-it; s-=cp; d.append((i, f"${s+cp:.2f}", f"${it:.2f}", f"${cp:.2f}", f"${c:.2f}"))
+            ReportGenerator.print_amortization(m, t*100, p, d)
         except: pass
 
-    def save(self):
-        if self.cb.get() and self.ep.get():
-            db.query("DELETE FROM usuarios WHERE usuario=%s", (self.cb.get(),))
-            db.query("INSERT INTO usuarios (usuario, password) VALUES (%s,%s)", (self.cb.get(), self.ep.get()))
-            messagebox.showinfo("OK", "Usuario Web Creado"); self.ep.delete(0,'end')
+class PageUsuarios(tk.Frame):
+    def __init__(self, p):
+        super().__init__(p, bg="white")
+        tk.Label(self, text="Accesos Web", font=("bold", 18), bg="white").pack(pady=20)
+        self.c = ttk.Combobox(self, width=20); self.c.pack(pady=5); self.p = tk.Entry(self, width=20); self.p.pack(pady=5)
+        ModernButton(self, "Guardar", self.sv).pack(pady=10); ModernButton(self, "Actualizar", self.ld, "white").pack()
+        self.ld()
+    def ld(self): 
+        try: self.c['values'] = [r[0] for r in db.fetch_all("SELECT nombre FROM inversiones")]
+        except: pass
+    def sv(self): db.query("DELETE FROM usuarios WHERE usuario=%s", (self.c.get(),)); db.query("INSERT INTO usuarios (usuario, password) VALUES (%s,%s)", (self.c.get(), self.p.get())); messagebox.showinfo("OK", "Guardado")
 
 # ======================================================
-# 🚀 APLICACIÓN PRINCIPAL (SIDEBAR NAVIGATION)
+# 🚀 APP PRINCIPAL
 # ======================================================
 class MainApp(tk.Tk):
     def __init__(self):
@@ -599,47 +369,22 @@ class MainApp(tk.Tk):
         UIHelper.center_window(self, 1100, 700)
         UIHelper.style_setup()
         
-        # --- Sidebar ---
-        self.sidebar = tk.Frame(self, bg=CONFIG["COLORS"]["sidebar"], width=250)
-        self.sidebar.pack(side="left", fill="y")
-        self.sidebar.pack_propagate(False) # Forzar ancho
-        
-        # Logo Area
-        tk.Label(self.sidebar, text="🌱", font=("Segoe UI Emoji", 50), bg=CONFIG["COLORS"]["sidebar"]).pack(pady=(40,10))
-        tk.Label(self.sidebar, text="FAMILY BICONS", font=("Segoe UI", 12, "bold"), fg="white", bg=CONFIG["COLORS"]["sidebar"]).pack()
-        tk.Label(self.sidebar, text="PLATINUM", font=("Segoe UI", 8), fg="#aaa", bg=CONFIG["COLORS"]["sidebar"]).pack(pady=(0,40))
+        self.sb = tk.Frame(self, bg=CONFIG["COLORS"]["sidebar"], width=250); self.sb.pack(side="left", fill="y"); self.sb.pack_propagate(False)
+        tk.Label(self.sb, text="🌱", font=("emoji", 50), bg=CONFIG["COLORS"]["sidebar"]).pack(pady=(40,10))
+        self.ca = tk.Frame(self, bg=CONFIG["COLORS"]["bg_app"]); self.ca.pack(side="right", fill="both", expand=True)
 
-        # Menu Buttons
-        self.btn_dashboard = self._add_menu_btn("📊  Dashboard", PageDashboard)
-        self.btn_acciones = self._add_menu_btn("💎  Acciones", PageInversiones)
-        self.btn_creditos = self._add_menu_btn("👥  Créditos", PageCreditos)
-        self.btn_simul = self._add_menu_btn("🧮  Simulador", PageSimulador)
-        self.btn_users = self._add_menu_btn("🔐  Usuarios Web", PageUsuarios)
-        
-        # --- Content Area ---
-        self.content_area = tk.Frame(self, bg=CONFIG["COLORS"]["bg_app"])
-        self.content_area.pack(side="right", fill="both", expand=True)
-        
-        # Iniciar en Dashboard
-        self.show_frame(PageDashboard)
+    def init_dashboard(self):
+        # Menu
+        for t, C in [("📊 Dashboard", PageDashboard), ("💎 Acciones", PageInversiones), ("👥 Créditos", PageCreditos), ("🧮 Simulador", PageSimulador), ("🔐 Usuarios", PageUsuarios)]:
+            tk.Button(self.sb, text=t, font=("Segoe UI", 11), fg="white", bg=CONFIG["COLORS"]["sidebar"], bd=0, anchor="w", padx=30, pady=12, command=lambda C=C: self.sw(C)).pack(fill="x")
+        self.sw(PageDashboard)
 
-    def _add_menu_btn(self, text, page_class):
-        btn = tk.Button(self.sidebar, text=text, font=("Segoe UI", 11), fg="white", bg=CONFIG["COLORS"]["sidebar"], 
-                        bd=0, anchor="w", padx=30, pady=12, cursor="hand2",
-                        activebackground=CONFIG["COLORS"]["sidebar_hover"], activeforeground="white",
-                        command=lambda: self.show_frame(page_class))
-        btn.pack(fill="x")
-        return btn
-
-    def show_frame(self, page_class):
-        # Limpiar area
-        for widget in self.content_area.winfo_children(): widget.destroy()
-        # Cargar nueva pagina
-        frame = page_class(self.content_area)
-        frame.pack(fill="both", expand=True)
+    def sw(self, C):
+        for w in self.ca.winfo_children(): w.destroy()
+        C(self.ca).pack(fill="both", expand=True)
 
 if __name__ == "__main__":
     app = MainApp()
-    app.withdraw()
-    Login(app)
+    app.withdraw() # Ocultamos la ventana principal
+    Login(app)     # Lanzamos Login
     app.mainloop()
