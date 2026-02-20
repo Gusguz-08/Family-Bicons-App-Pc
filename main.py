@@ -85,6 +85,7 @@ class DatabaseManager:
         """ Revisa si la tabla vieja necesita la nueva columna de Tasa """
         try:
             self.cursor.execute("ALTER TABLE deudores ADD COLUMN IF NOT EXISTS tasa REAL DEFAULT 5.0")
+            self.cursor.execute("ALTER TABLE deudores ADD COLUMN IF NOT EXISTS sistema TEXT DEFAULT 'Letras Fijas'")
             self.conn.commit()
         except:
             self.conn.rollback()
@@ -349,6 +350,11 @@ class TabCalc(tk.Frame):
             e = tk.Entry(f_in, width=10, justify="center", font=("Segoe UI", 11), bg="#f9f9f9", bd=1, relief="solid")
             e.grid(row=0, column=col*2+1, padx=5, ipady=3)
             self.ents[txt] = e
+        # --- NUEVO: Selector en el Simulador ---
+        tk.Label(f_in, text="Amortización:", bg="white", font=("Segoe UI", 10)).grid(row=0, column=6, padx=(10,5), sticky="e")
+        self.cb_sim_sis = ttk.Combobox(f_in, values=["Letras Fijas", "Letras Constantes"], width=15, state="readonly")
+        self.cb_sim_sis.current(0)
+        self.cb_sim_sis.grid(row=0, column=7, padx=5, ipady=3)
 
         f_btn = tk.Frame(self, bg="white", pady=20); f_btn.pack()
         UIHelper.btn(f_btn, "CALCULAR CUOTAS", self.calc, CONFIG["COLORS"]["secondary"]).pack(side="left", padx=10)
@@ -360,16 +366,31 @@ class TabCalc(tk.Frame):
         for c in cols: self.tree.heading(c, text=c); self.tree.column(c, width=120, anchor="center")
         self.tree.pack(fill="both", expand=True, padx=30, pady=20)
 
-    def calc(self):
+def calc(self):
         for i in self.tree.get_children(): self.tree.delete(i)
         try:
             m = float(self.ents["Monto ($):"].get()); t = float(self.ents["Tasa Mensual (%):"].get()) / 100; p = int(self.ents["Plazo (Meses):"].get())
-            c = m * (t * (1 + t)**p) / ((1 + t)**p - 1) if t > 0 else m / p
+            sistema = self.cb_sim_sis.get() # Leer el sistema elegido
+            
+            c_fija = m * (t * (1 + t)**p) / ((1 + t)**p - 1) if t > 0 else m / p
+            cap_constante = m / p # Para letras constantes
+            
             saldo = m; self.data = []
             for i in range(1, p + 1):
-                interes = saldo * t; capital = c - interes; saldo -= capital
-                if i == p: capital += saldo; saldo = 0
-                row = (i, f"${(saldo+capital):,.2f}", f"${interes:,.2f}", f"${capital:,.2f}", f"${c:,.2f}")
+                interes = saldo * t
+                
+                # LA MAGIA MATEMÁTICA ESTÁ AQUÍ
+                if sistema == "Letras Fijas":
+                    capital = c_fija - interes
+                    cuota = c_fija
+                else: # Letras Constantes
+                    capital = cap_constante
+                    cuota = capital + interes
+                    
+                saldo -= capital
+                if i == p: capital += saldo; saldo = 0; cuota = capital + interes
+                
+                row = (i, f"${(saldo+capital):,.2f}", f"${interes:,.2f}", f"${capital:,.2f}", f"${cuota:,.2f}")
                 self.tree.insert("", "end", values=row); self.data.append(row)
             self.btn_print["state"] = "normal"
         except: messagebox.showerror("Error", "Por favor ingresa números válidos.")
@@ -539,14 +560,20 @@ class TabDebtors(tk.Frame):
         tk.Label(f_new, text="Plazo (Meses):", bg="white").grid(row=1, column=2, sticky="w")
         self.e_pla = tk.Entry(f_new, width=8, bd=1, relief="solid"); self.e_pla.grid(row=1, column=3, padx=10, pady=5, sticky="w")
         
-        # Fila 3 - TASA EDITABLE
+       # Fila 3 - TASA EDITABLE
         tk.Label(f_new, text="Tasa Mensual (%):", bg="white", fg=CONFIG["COLORS"]["accent"]).grid(row=1, column=4, sticky="w")
         self.e_tasa = tk.Entry(f_new, width=8, bd=1, relief="solid", bg="#fff3e0")
         self.e_tasa.insert(0, str(CONFIG["TASA_SUGERIDA_MENSUAL"])) # Valor sugerido
         self.e_tasa.grid(row=1, column=5, padx=10, pady=5, sticky="w")
         
-        UIHelper.btn(f_new, "💾 Guardar Crédito", self.add, CONFIG["COLORS"]["primary"]).grid(row=0, column=6, rowspan=2, padx=20)
-
+        # --- NUEVO CÓDIGO: RECUADRO DE LETRAS ---
+        tk.Label(f_new, text="Amortización:", bg="white").grid(row=2, column=0, sticky="w", pady=(5,0))
+        self.cb_sistema = ttk.Combobox(f_new, values=["Letras Fijas", "Letras Constantes"], width=20, state="readonly")
+        self.cb_sistema.current(0) # Selecciona "Letras Fijas" por defecto
+        self.cb_sistema.grid(row=2, column=1, columnspan=2, padx=10, pady=(5,0), sticky="w")
+        
+        # OJO: Cambiamos rowspan=2 a rowspan=3 para que el botón verde se estire y no rompa el diseño
+        UIHelper.btn(f_new, "💾 Guardar Crédito", self.add, CONFIG["COLORS"]["primary"]).grid(row=0, column=6, rowspan=3, padx=20)
         # --- Tabla ---
         cols = ("ID", "Nom", "Tipo", "Mon", "Pla", "Est", "Tasa")
         self.tr = ttk.Treeview(self, columns=cols, show="headings", height=8)
@@ -587,11 +614,12 @@ class TabDebtors(tk.Frame):
             mon = float(self.e_mon.get())
             pla = int(self.e_pla.get())
             tas = float(self.e_tasa.get()) # Tasa personalizada
+            sis = self.cb_sistema.get()
             if not cli: return
             
             mes = datetime.now().strftime("%b")
-            db.query("INSERT INTO deudores (nombre, mes, plazo, monto, estado, tipo, cuotas_pagadas, tasa) VALUES (?,?,?,?,?,?,?,?)", 
-                     (cli, mes, pla, mon, "Pendiente", tip, 0, tas))
+            db.query("INSERT INTO deudores (nombre, mes, plazo, monto, estado, tipo, cuotas_pagadas, tasa) VALUES (?,?,?,?,?,?,?,?,?)", 
+                     (cli, mes, pla, mon, "Pendiente", tip, 0, tas, sis))
             self.load()
             self.e_mon.delete(0, 'end'); self.e_pla.delete(0, 'end'); self.e_tasa.delete(0,'end'); self.e_tasa.insert(0, CONFIG["TASA_SUGERIDA_MENSUAL"])
         except Exception as e:
@@ -610,8 +638,8 @@ class TabDebtors(tk.Frame):
         data = db.fetch_all("SELECT * FROM deudores WHERE id=?", (id_credito,))[0]
         
         nom, plazo, monto, estado, tipo, pagadas = data[1], data[3], data[4], data[5], data[6], data[7]
-        # Recuperar tasa específica o usar default si es viejo
         tasa_aplicada = data[8] if len(data)>8 and data[8] is not None else CONFIG["TASA_SUGERIDA_MENSUAL"]
+        sistema_aplicado = data[9] if len(data)>9 and data[9] else "Letras Fijas"
 
         if pagadas is None: pagadas = 0
         if tipo is None: tipo = "Normal"
@@ -632,7 +660,7 @@ class TabDebtors(tk.Frame):
         if tipo == "Emergente":
             self.build_emergente_ui(win, id_credito, nom, monto, estado, tasa_aplicada)
         else:
-            self.build_normal_ui(win, id_credito, nom, monto, plazo, pagadas, estado, tipo, tasa_aplicada)
+            self.build_normal_ui(win, id_credito, nom, monto, plazo, pagadas, estado, tipo, tasa_aplicada, sistema_aplicado)
 
     def build_emergente_ui(self, win, id_, nom, monto, estado, tasa):
         fr = tk.Frame(win, bg="#fff8e1", pady=20, padx=20); fr.pack(fill="both", expand=True, padx=30, pady=10)
@@ -656,10 +684,11 @@ class TabDebtors(tk.Frame):
         UIHelper.btn(fr, f"Solo Interés (${interes_calc:.2f})", pagar_interes, CONFIG["COLORS"]["accent"]).pack(pady=5, fill="x")
         UIHelper.btn(fr, f"Pagar Total (${monto+interes_calc:.2f})", pagar_total, CONFIG["COLORS"]["primary"]).pack(pady=5, fill="x")
 
-    def build_normal_ui(self, win, id_, nom, monto, plazo, pagadas, estado, tipo, tasa):
-        # Cálculo con tasa específica
+# Le agregamos el parámetro 'sistema' al final
+    def build_normal_ui(self, win, id_, nom, monto, plazo, pagadas, estado, tipo, tasa, sistema):
         i_rate = tasa / 100
-        cuota_val = monto * (i_rate * (1 + i_rate)**plazo) / ((1 + i_rate)**plazo - 1)
+        c_fija = monto * (i_rate * (1 + i_rate)**plazo) / ((1 + i_rate)**plazo - 1)
+        cap_constante = monto / plazo
         
         datos_para_imprimir = [] 
         
@@ -672,9 +701,9 @@ class TabDebtors(tk.Frame):
         header_frame = tk.Frame(main_cont, bg="white")
         header_frame.pack(fill="x", pady=(0, 10))
         UIHelper.btn(header_frame, "🖨️ IMPRIMIR ESTADO DE CUENTA", imprimir_reporte, "#455a64").pack(side="right")
-        tk.Label(header_frame, text="Tabla de Amortización", font=("Segoe UI", 12, "bold"), bg="white").pack(side="left")
+        tk.Label(header_frame, text=f"Tabla de Amortización ({sistema})", font=("Segoe UI", 12, "bold"), bg="white").pack(side="left")
 
-        # Tabla Scrollable
+        # Tabla Scrollable (sin cambios)
         container = tk.Frame(main_cont, bg="white")
         container.pack(fill="both", expand=True)
         canvas = tk.Canvas(container, bg="white", highlightthickness=0)
@@ -693,7 +722,15 @@ class TabDebtors(tk.Frame):
         saldo = monto
         for i in range(1, plazo + 1):
             interes = saldo * i_rate
-            capital = cuota_val - interes
+            
+            # --- NUEVO: Matemáticas separadas por sistema ---
+            if sistema == "Letras Fijas":
+                capital = c_fija - interes
+                cuota = c_fija
+            else:
+                capital = cap_constante
+                cuota = capital + interes
+                
             saldo -= capital
             if i == plazo: saldo = 0 
             
@@ -702,22 +739,23 @@ class TabDebtors(tk.Frame):
             fg_color = CONFIG['COLORS']['primary'] if es_pagado else CONFIG['COLORS']['danger']
             texto_est = "PAGADO" if es_pagado else "PENDIENTE"
             
-            datos_para_imprimir.append([i, f"${cuota_val:,.2f}", texto_est])
+            # Usamos 'cuota' en lugar de 'cuota_val'
+            datos_para_imprimir.append([i, f"${cuota:,.2f}", texto_est])
 
             tk.Label(t_frame, text=f"{i}", bg="white", pady=8).grid(row=i, column=0)
-            tk.Label(t_frame, text=f"${cuota_val:,.2f}", bg="white").grid(row=i, column=1)
+            tk.Label(t_frame, text=f"${cuota:,.2f}", bg="white").grid(row=i, column=1)
             lbl_est = tk.Label(t_frame, text=texto_est, bg=bg_color, fg=fg_color, width=12, font=("Arial", 8, "bold"), pady=2)
             lbl_est.grid(row=i, column=2, padx=5, pady=2)
             
             if not es_pagado and i == pagadas + 1:
+                # OJO: Pasamos 'cuota' al botón en lugar de 'cuota_val'
                 btn = tk.Button(t_frame, text="💵 PAGAR", bg=CONFIG['COLORS']['secondary'], fg="white", font=("Arial", 8, "bold"), cursor="hand2", relief="flat",
-                                command=lambda n=i, c=cuota_val: self.pagar_cuota_normal(id_, n, c, nom, plazo, win))
+                                command=lambda n=i, c=cuota: self.pagar_cuota_normal(id_, n, c, nom, plazo, win))
                 btn.grid(row=i, column=3, padx=5)
             elif es_pagado:
                 tk.Label(t_frame, text="✔", fg="green", bg="white", font=("Arial", 14)).grid(row=i, column=3)
             else:
                 tk.Label(t_frame, text="🔒", fg="#ccc", bg="white").grid(row=i, column=3)
-
     def pagar_cuota_normal(self, id_, num_cuota, valor, nom, total_plazo, win):
         db.query("UPDATE deudores SET cuotas_pagadas=? WHERE id=?", (num_cuota, id_))
         if num_cuota == total_plazo:
