@@ -617,7 +617,7 @@ class TabDebtors(tk.Frame):
             if not cli: return
             
             mes = datetime.now().strftime("%b")
-            db.query("INSERT INTO deudores (nombre, mes, plazo, monto, estado, tipo, cuotas_pagadas, tasa) VALUES (?,?,?,?,?,?,?,?,?)", 
+            db.query("INSERT INTO deudores (nombre, mes, plazo, monto, estado, tipo, cuotas_pagadas, tasa, sistema) VALUES (?,?,?,?,?,?,?,?,?)", 
                      (cli, mes, pla, mon, "Pendiente", tip, 0, tas, sis))
             self.load()
             self.e_mon.delete(0, 'end'); self.e_pla.delete(0, 'end'); self.e_tasa.delete(0,'end'); self.e_tasa.insert(0, CONFIG["TASA_SUGERIDA_MENSUAL"])
