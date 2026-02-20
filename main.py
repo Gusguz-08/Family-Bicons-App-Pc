@@ -366,7 +366,7 @@ class TabCalc(tk.Frame):
         for c in cols: self.tree.heading(c, text=c); self.tree.column(c, width=120, anchor="center")
         self.tree.pack(fill="both", expand=True, padx=30, pady=20)
 
-def calc(self):
+    def calc(self):
         for i in self.tree.get_children(): self.tree.delete(i)
         try:
             m = float(self.ents["Monto ($):"].get()); t = float(self.ents["Tasa Mensual (%):"].get()) / 100; p = int(self.ents["Plazo (Meses):"].get())
@@ -394,7 +394,7 @@ def calc(self):
                 self.tree.insert("", "end", values=row); self.data.append(row)
             self.btn_print["state"] = "normal"
         except: messagebox.showerror("Error", "Por favor ingresa números válidos.")
-def print_pdf(self):
+    def print_pdf(self):
         if hasattr(self, 'data'):
             m = self.ents["Monto ($):"].get(); t = self.ents["Tasa Mensual (%):"].get(); p = self.ents["Plazo (Meses):"].get()
             ReportGenerator.print_amortization(m, t, p, self.data)
