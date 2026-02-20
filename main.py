@@ -394,7 +394,6 @@ def calc(self):
                 self.tree.insert("", "end", values=row); self.data.append(row)
             self.btn_print["state"] = "normal"
         except: messagebox.showerror("Error", "Por favor ingresa números válidos.")
-
     def print_pdf(self):
         if hasattr(self, 'data'):
             m = self.ents["Monto ($):"].get(); t = self.ents["Tasa Mensual (%):"].get(); p = self.ents["Plazo (Meses):"].get()
